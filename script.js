@@ -954,8 +954,9 @@ async function carregarAlunosDiario() {
             const n2 = m.nota2 !== null && m.nota2 !== undefined ? m.nota2 : null;
             const media = m.media !== null && m.media !== undefined ? m.media : null;
 
-            const status = media !== null ? (media >= 7 ? 'Aprovado' : 'Em Recuperação') : '-';
-            const badgeClass = media !== null ? (media >= 7 ? 'badge-aprovado' : 'badge-recuperacao') : '';
+            // Status: Aprovado (≥7) ou Reprovado (<7). "Em Recuperação" foi descontinuado.
+            const status = media !== null ? (media >= 7 ? 'Aprovado' : 'Reprovado') : '-';
+            const badgeClass = media !== null ? (media >= 7 ? 'badge-aprovado' : 'badge-reprovado') : '';
 
             const tr = document.createElement('tr');
             tr.innerHTML = `

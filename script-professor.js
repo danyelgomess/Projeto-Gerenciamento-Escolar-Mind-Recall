@@ -4,6 +4,17 @@
 // Nenhuma variável compartilhada com script-secretaria.js.
 // ============================================================
 
+/**
+ * Formata o RA puro de 12 dígitos para exibição visual: CCC.TTTT.AAAAA
+ * Ex.: "250250000001" → "250.2500.00001"
+ */
+function formatarRA(ra) {
+    if (!ra) return '-';
+    const s = String(ra).replace(/\D/g, '');
+    if (s.length !== 12) return ra;
+    return `${s.slice(0, 3)}.${s.slice(3, 7)}.${s.slice(7)}`;
+}
+
 const SUPABASE_URL = 'https://gijgocyrumhalzqhkggj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_SBbgOvJCx21UjRJucquDTQ_kWhEL8Nx';
 
@@ -281,10 +292,10 @@ async function carregarAlunosDaTurma(valorVinculo) {
     if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--txt-light);"><span class="spinner"></span> Carregando...</td></tr>';
 
     try {
-        // Monta a query base filtrando por curso_id
+        // Query: traz ra diretamente da matrícula (não de alunos)
         let query = db
             .from('matriculas')
-            .select('id, turma, alunos(nome, cpf, ra), cursos(nome)')
+            .select('id, ra, turma, alunos(nome, cpf), cursos(nome)')
             .eq('curso_id', cursoId);
 
         // Se não for vínculo geral, filtra também pela turma_nome exata
@@ -302,17 +313,18 @@ async function carregarAlunosDaTurma(valorVinculo) {
         }
 
         if (tbody) tbody.innerHTML = matriculas.map(m => {
-            const nome = m.alunos ? m.alunos.nome : '-';
-            const cpf = m.alunos ? (m.alunos.cpf || '-') : '-';
+            const nome  = m.alunos ? m.alunos.nome : '-';
+            const cpf   = m.alunos ? (m.alunos.cpf || '-') : '-';
             const curso = m.cursos ? m.cursos.nome : '-';
-            const ra = m.alunos ? (m.alunos.ra || '-') : '-';
+            // RA vem da linha da matrícula (específico por curso)
+            const ra    = formatarRA(m.ra);
 
             return `
                 <tr>
                     <td><strong>${nome}</strong></td>
                     <td>${cpf}</td>
                     <td>${curso}</td>
-                    <td>${ra}</td>
+                    <td style="font-family:monospace;">${ra}</td>
                 </tr>
             `;
         }).join('');
@@ -340,13 +352,13 @@ async function carregarDiarioProfessor() {
             return;
         }
 
-        // Busca matrículas das turmas do professor
+        // Busca matrículas das turmas do professor — traz ra da matrícula
         let allMatriculas = [];
 
         if (turmasDoProf.length > 0) {
             const { data: matTurmas, error: errT } = await db
                 .from('matriculas')
-                .select('*, alunos(nome, cpf, ra), cursos(nome)')
+                .select('*, ra, alunos(nome, cpf), cursos(nome)')
                 .in('turma', turmasDoProf);
             if (errT) throw errT;
             allMatriculas = allMatriculas.concat(matTurmas || []);
@@ -355,7 +367,7 @@ async function carregarDiarioProfessor() {
         if (cursosDoProf.length > 0) {
             const { data: matCursos, error: errC } = await db
                 .from('matriculas')
-                .select('*, alunos(nome, cpf, ra), cursos(nome)')
+                .select('*, ra, alunos(nome, cpf), cursos(nome)')
                 .in('curso_id', cursosDoProf);
             if (errC) throw errC;
             // Evita duplicatas
@@ -391,7 +403,8 @@ async function carregarDiarioProfessor() {
         if (filtroBusca) {
             filtrados = filtrados.filter(m => {
                 const nomeAluno = (m.alunos?.nome || '').toLowerCase();
-                const raAluno = m.alunos?.ra ? String(m.alunos.ra) : '';
+                // Busca pelo RA da matrícula (não mais de alunos.ra)
+                const raAluno = m.ra ? String(m.ra) : '';
                 return nomeAluno.includes(filtroBusca) || raAluno.includes(filtroBusca);
             });
         }
@@ -404,30 +417,43 @@ async function carregarDiarioProfessor() {
         tbody.innerHTML = filtrados.map(m => {
             const nomeAluno = m.alunos ? m.alunos.nome : '-';
             const nomeCurso = m.cursos ? m.cursos.nome : '-';
+            // RA vem da linha da matrícula específica
+            const raFormatado = formatarRA(m.ra);
 
             const n1 = m.nota1 !== null && m.nota1 !== undefined ? m.nota1 : null;
             const n2 = m.nota2 !== null && m.nota2 !== undefined ? m.nota2 : null;
             const media = m.media !== null && m.media !== undefined ? m.media : null;
 
-            const status = media !== null ? (media >= 7 ? 'Aprovado' : 'Em Recuperação') : '-';
-            const badgeClass = media !== null ? (media >= 7 ? 'badge-aprovado' : 'badge-recuperacao') : '';
+            // Situacao: só definida quando há média calculada
+            const isAprovado  = media !== null && media >= 7;
+            const isReprovado = media !== null && media < 7;
+            const status    = isAprovado ? 'Aprovado' : (isReprovado ? 'Reprovado' : 'Pendente');
+            const badgeClass = isAprovado ? 'badge-aprovado' : (isReprovado ? 'badge-reprovado' : '');
+            const badgeHtml  = media !== null
+                ? `<span class="badge ${badgeClass}">${status}</span>`
+                : `<span style="color:var(--txt-light);font-size:0.85em;">Pendente</span>`;
 
-            // Botão dinâmico: se já tem as duas notas cadastradas → modo Editar; caso contrário → modo Lançar
             const temNotas = n1 !== null && n2 !== null;
             const btnClass = temNotas ? 'btn-editar' : 'btn-action';
             const btnTexto = temNotas ? '✏️ Editar Notas' : '📝 Lançar Notas';
+
+            // Botão certificado: SOMENTE se Situacao === 'Aprovado'
+            const btnCertificado = isAprovado
+                ? `<button type="button" class="btn-action" style="background:var(--verde);color:#fff;border-color:var(--verde);" onclick="enviarCertificado('${m.id}')">&#127891; Certificado</button>`
+                : '';
 
             return `
                 <tr>
                     <td>${nomeAluno}</td>
                     <td>${nomeCurso}</td>
-                    <td>${m.turma || '-'}</td>
+                    <td style="font-family:monospace;font-size:0.85em;">${raFormatado}</td>
                     <td>${n1 !== null ? n1 : '-'}</td>
                     <td>${n2 !== null ? n2 : '-'}</td>
                     <td><strong>${media !== null ? parseFloat(media).toFixed(1) : '-'}</strong></td>
-                    <td>${media !== null ? `<span class="badge ${badgeClass}">${status}</span>` : '-'}</td>
-                    <td>
+                    <td>${badgeHtml}</td>
+                    <td style="display:flex;gap:6px;flex-wrap:wrap;">
                         <button type="button" class="${btnClass}" onclick="abrirModalNotasProf('${m.id}', '${nomeAluno.replace(/'/g, "\\'")}', '${nomeCurso.replace(/'/g, "\\'")}', ${temNotas})">${btnTexto}</button>
+                        ${btnCertificado}
                     </td>
                 </tr>
             `;
@@ -492,17 +518,27 @@ function fecharModalNotasProf() {
 async function salvarNotasProf() {
     if (matriculaNotasId === null) return;
 
-    const nota1Str = document.getElementById('prof-nota1-input').value;
-    const nota2Str = document.getElementById('prof-nota2-input').value;
+    const nota1Str = document.getElementById('prof-nota1-input').value.trim();
+    const nota2Str = document.getElementById('prof-nota2-input').value.trim();
 
-    if (nota1Str === '' || nota2Str === '') {
-        mostrarAlerta('Preencha os dois campos de notas!');
+    // Campos vazios são permitidos: resetam a nota para null
+    const n1 = nota1Str !== '' ? parseFloat(nota1Str) : null;
+    const n2 = nota2Str !== '' ? parseFloat(nota2Str) : null;
+
+    // Validação de intervalo (0-10) somente quando não são nulos
+    if (n1 !== null && (isNaN(n1) || n1 < 0 || n1 > 10)) {
+        mostrarAlerta('N1 inválido. Insira um valor entre 0 e 10, ou deixe em branco para limpar.');
+        return;
+    }
+    if (n2 !== null && (isNaN(n2) || n2 < 0 || n2 > 10)) {
+        mostrarAlerta('N2 inválido. Insira um valor entre 0 e 10, ou deixe em branco para limpar.');
         return;
     }
 
-    const n1 = parseFloat(nota1Str);
-    const n2 = parseFloat(nota2Str);
-
+    // Envia APENAS nota1 e nota2.
+    // A coluna `media` é GENERATED ALWAYS AS no PostgreSQL — o banco a calcula
+    // automaticamente a partir de nota1 e nota2. Enviá-la causaria:
+    // "column media can only be updated to DEFAULT"
     const { error } = await db
         .from('matriculas')
         .update({ nota1: n1, nota2: n2 })
@@ -515,7 +551,12 @@ async function salvarNotasProf() {
 
     fecharModalNotasProf();
     await carregarDiarioProfessor();
-    mostrarAlerta('Notas salvas com sucesso!', 'Sucesso');
+    mostrarAlerta(
+        n1 === null && n2 === null
+            ? 'Notas removidas. Situação do aluno voltou para Pendente.'
+            : 'Notas salvas com sucesso!',
+        'Sucesso'
+    );
 }
 
 // ==================== DISPARO DE AVISOS (PROFESSOR) ====================

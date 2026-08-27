@@ -102,6 +102,9 @@ function realizarRedirecionamento(tipo) {
         window.location.href = 'painel-secretaria.html';
     } else if (tipo === 'professor') {
         window.location.href = 'painel-professor.html';
+    } else if (tipo === 'aluno') {
+        // Alunos acessam pelo Portal do Aluno — redireciona
+        window.location.href = 'painel-aluno.html';
     } else {
         mostrarAlertaLogin('Tipo de perfil desconhecido. Contate o administrador.');
     }

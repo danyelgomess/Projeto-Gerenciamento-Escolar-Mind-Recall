@@ -354,3 +354,180 @@ CREATE POLICY "secretaria_update_financeiro" ON public.financeiro FOR UPDATE TO 
 CREATE POLICY "secretaria_delete_financeiro" ON public.financeiro FOR DELETE TO authenticated USING (
     EXISTS (SELECT 1 FROM public.perfis WHERE perfis.id = auth.uid() AND perfis.tipo = 'secretaria')
 );
+
+-- ============================================================
+-- EVOLUÇÃO v2 — RA Composto (CCCTTTTAAAAA) + Documentos
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- Data: 2026-08
+-- ============================================================
+
+-- 1. TABELA cursos: adicionar código numérico do curso (3 dígitos)
+ALTER TABLE public.cursos
+    ADD COLUMN IF NOT EXISTS codigo_curso TEXT;
+
+COMMENT ON COLUMN public.cursos.codigo_curso IS 'Código numérico do curso (3 dígitos, ex: 001). Componente CCC do RA.';
+
+-- 2. TABELA matriculas: adicionar código da turma (4 dígitos) e RA composto
+ALTER TABLE public.matriculas
+    ADD COLUMN IF NOT EXISTS codigo_turma TEXT,
+    ADD COLUMN IF NOT EXISTS ra           TEXT;
+
+COMMENT ON COLUMN public.matriculas.codigo_turma IS 'Código numérico da turma (4 dígitos, ex: 2024). Componente TTTT do RA.';
+COMMENT ON COLUMN public.matriculas.ra            IS 'RA composto gerado pelo sistema no formato CCCTTTTAAAAA (12 dígitos).';
+
+-- Índice para busca rápida por RA na tabela matriculas
+CREATE INDEX IF NOT EXISTS idx_matriculas_ra ON public.matriculas (ra);
+
+-- 3. TABELA alunos: garantir coluna ra como TEXT (suporte ao RA composto legado)
+DO $$
+BEGIN
+    -- Se a coluna ra já existe com tipo diferente de text, converte
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'alunos'
+          AND column_name  = 'ra'
+          AND data_type   <> 'text'
+    ) THEN
+        ALTER TABLE public.alunos ALTER COLUMN ra TYPE TEXT USING ra::TEXT;
+    END IF;
+
+    -- Se não existir, cria como TEXT
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'alunos'
+          AND column_name  = 'ra'
+    ) THEN
+        ALTER TABLE public.alunos ADD COLUMN ra TEXT;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN public.alunos.ra IS 'RA legado do aluno (mantido para compatibilidade). Novos RAs ficam em matriculas.ra.';
+
+-- 4. TABELA alunos: coluna de documento RG/CNH (URL ou path Supabase Storage)
+ALTER TABLE public.alunos
+    ADD COLUMN IF NOT EXISTS documento_rg TEXT;
+
+COMMENT ON COLUMN public.alunos.documento_rg IS 'URL/path do documento de identidade (RG ou CNH) enviado pelo aluno no onboarding.';
+
+-- ============================================================
+-- VERIFICAÇÃO — Rode estas queries APÓS executar este bloco:
+-- ============================================================
+-- SELECT column_name, data_type FROM information_schema.columns
+-- WHERE table_schema = 'public' AND table_name = 'cursos'
+-- ORDER BY ordinal_position;
+--
+-- SELECT column_name, data_type FROM information_schema.columns
+-- WHERE table_schema = 'public' AND table_name = 'matriculas'
+-- ORDER BY ordinal_position;
+--
+-- SELECT column_name, data_type FROM information_schema.columns
+-- WHERE table_schema = 'public' AND table_name = 'alunos'
+-- ORDER BY ordinal_position;
+-- ============================================================
+
+-- ============================================================
+-- EVOLUÇÃO v3 — Tabela TURMAS desacoplada + turma_id em matriculas
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- Data: 2026-08
+-- ============================================================
+
+-- 1. CRIAR TABELA turmas
+CREATE TABLE IF NOT EXISTS public.turmas (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome        TEXT NOT NULL,
+    curso_id    UUID NOT NULL REFERENCES public.cursos(id) ON DELETE CASCADE,
+    codigo_turma TEXT NOT NULL,          -- 4 dígitos numéricos (TTTT)
+    codigo_curso TEXT,                   -- 3 dígitos (CCC) — espelhado de cursos.codigo_curso para conveniência
+    ativa        BOOLEAN NOT NULL DEFAULT TRUE,
+    criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    criado_por  UUID REFERENCES auth.users(id) ON DELETE SET NULL
+);
+
+COMMENT ON TABLE  public.turmas IS 'Turmas de cada curso. Desacopladas do formulário de matrícula para evitar duplicidade.';
+COMMENT ON COLUMN public.turmas.codigo_turma IS 'Código numérico de 4 dígitos que compõe o TTTT do RA (ex: 2024).';
+COMMENT ON COLUMN public.turmas.codigo_curso IS 'Código CCC espelhado de cursos.codigo_curso, salvo aqui para conveniência na geração do RA.';
+
+-- Índice único: não pode haver duas turmas com o mesmo codigo_turma para o mesmo curso
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turmas_curso_codigo
+    ON public.turmas (curso_id, codigo_turma);
+
+-- 2. ADICIONAR turma_id em matriculas (FK para turmas)
+ALTER TABLE public.matriculas
+    ADD COLUMN IF NOT EXISTS turma_id UUID REFERENCES public.turmas(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN public.matriculas.turma_id IS 'FK para a tabela turmas. Fonte de verdade da turma da matrícula.';
+
+-- Índice para COUNT rápido na geração do RA
+CREATE INDEX IF NOT EXISTS idx_matriculas_turma_id ON public.matriculas (turma_id);
+
+-- 3. RLS PARA turmas — secretaria pode tudo; outros perfis podem ler
+ALTER TABLE public.turmas ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "secretaria_select_turmas" ON public.turmas FOR SELECT TO authenticated
+    USING (TRUE);
+
+CREATE POLICY "secretaria_insert_turmas" ON public.turmas FOR INSERT TO authenticated
+    WITH CHECK (
+        EXISTS (SELECT 1 FROM public.perfis WHERE perfis.id = auth.uid() AND perfis.tipo IN ('secretaria', 'admin'))
+    );
+
+CREATE POLICY "secretaria_update_turmas" ON public.turmas FOR UPDATE TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM public.perfis WHERE perfis.id = auth.uid() AND perfis.tipo IN ('secretaria', 'admin'))
+    );
+
+CREATE POLICY "secretaria_delete_turmas" ON public.turmas FOR DELETE TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM public.perfis WHERE perfis.id = auth.uid() AND perfis.tipo IN ('secretaria', 'admin'))
+    );
+
+-- ============================================================
+-- VERIFICAÇÃO v3
+-- ============================================================
+-- SELECT * FROM public.turmas LIMIT 5;
+-- SELECT column_name, data_type FROM information_schema.columns
+-- WHERE table_schema = 'public' AND table_name = 'matriculas'
+-- ORDER BY ordinal_position;
+-- ============================================================
+
+-- ============================================================
+-- EVOLUÇÃO v4 — Portal do Aluno: email sintético + perfil de aluno
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- Data: 2026-08
+-- ============================================================
+
+-- 1. Adiciona coluna email_sintetico na tabela alunos
+ALTER TABLE public.alunos
+    ADD COLUMN IF NOT EXISTS email_sintetico TEXT;
+
+COMMENT ON COLUMN public.alunos.email_sintetico IS
+    'E-mail sintético para autenticação: CPF_NUMEROS@aluno.mindrecall.com.br';
+
+-- 2. Garante que perfis de tipo ''aluno'' são aceitos pelo CHECK
+--    (caso a tabela perfis tenha constraint de tipo)
+-- ALTER TABLE public.perfis DROP CONSTRAINT IF EXISTS perfis_tipo_check;
+-- ALTER TABLE public.perfis ADD CONSTRAINT perfis_tipo_check
+--     CHECK (tipo IN (''secretaria'', ''professor'', ''admin'', ''aluno''));
+
+-- 3. Índice para busca rápida por CPF
+CREATE INDEX IF NOT EXISTS idx_alunos_cpf ON public.alunos (cpf);
+
+-- 4. (OPCIONAL) Trigger para criar perfil automático quando auth.users é criado via signUp
+--    Se o projeto já tem um trigger handle_new_user, adicione o caso 'aluno':
+-- CREATE OR REPLACE FUNCTION public.handle_new_user()
+-- RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+-- BEGIN
+--   INSERT INTO public.perfis (id, tipo, nome)
+--   VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'tipo', 'aluno'), COALESCE(NEW.raw_user_meta_data->>'nome', NEW.email))
+--   ON CONFLICT (id) DO NOTHING;
+--   RETURN NEW;
+-- END;
+-- $$;
+
+-- ============================================================
+-- VERIFICAÇÃO v4
+-- ============================================================
+-- SELECT id, nome, cpf, email_sintetico FROM public.alunos LIMIT 5;
+-- ============================================================

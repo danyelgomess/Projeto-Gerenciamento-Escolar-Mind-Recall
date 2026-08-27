@@ -696,6 +696,14 @@ table tbody tr:hover {
     border: 1px solid var(--amarelo-border);
 }
 
+/* "Reprovado" substituiu "Em Recuperação" — mantém badge-recuperacao para dados legados */
+.badge-reprovado,
+.badge-atrasado {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
 /* ==================== ABA SOBRE ==================== */
 
 /* Hero: logo + texto lado a lado */
@@ -1598,6 +1606,16 @@ table tbody tr:hover {
 }
 
 /* ── Badges de Status de Pagamento ── */
+[class^="badge-status-"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
+    vertical-align: middle;
+    line-height: 1;
+}
+
 .badge-status-pago {
     background: var(--verde-bg);
     color: var(--verde);

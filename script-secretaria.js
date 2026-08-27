@@ -169,6 +169,7 @@ function iniciarAplicacao() {
 
     if (typeof atualizarDashboard === 'function') atualizarDashboard();
     if (typeof carregarCursos === 'function') carregarCursos();
+    if (typeof carregarTurmas === 'function') carregarTurmas();
     if (typeof carregarAlunos === 'function') carregarAlunos();
     if (typeof carregarOpcoesVinculo === 'function') carregarOpcoesVinculo();
     if (typeof carregarVinculos === 'function') carregarVinculos();
@@ -240,6 +241,183 @@ function openTab(evt, tabName) {
     else if (tabName === 'financeiro') carregarFinanceiro();
     else if (tabName === 'contratos') carregarContratos();
     else if (tabName === 'certificados') carregarCertificados();
+    else if (tabName === 'professores') carregarTurmas();
+}
+
+// ==================== TURMAS ====================
+
+/** Cache global de turmas — evita refetch desnecessário */
+let turmasCache = [];
+
+/**
+ * Carrega todas as turmas do banco e popula:
+ *  1. A tabela #lista-turmas (aba Professores)
+ *  2. O select #visao-turma-select (visão geral)
+ *  3. Todos os .turma-select no formulário de matrícula (via refreshTurmaSelects)
+ */
+async function carregarTurmas() {
+    try {
+        const { data, error } = await db
+            .from('turmas')
+            .select('*, cursos(nome, codigo_curso)')
+            .order('criado_em', { ascending: false });
+
+        if (error) throw error;
+
+        turmasCache = data || [];
+
+        // 1. Renderiza tabela de turmas
+        const tbody = document.getElementById('lista-turmas');
+        if (tbody) {
+            tbody.innerHTML = '';
+            for (const t of turmasCache) {
+                // Conta quantos alunos estão matriculados nesta turma
+                const { count } = await db
+                    .from('matriculas')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('turma_id', t.id);
+
+                const codigoCursoExibido = t.codigo_curso
+                    ? `<span style="font-family:monospace;font-size:0.85em;background:var(--panel-off);padding:2px 6px;border-radius:4px;">CCC: ${t.codigo_curso}</span>`
+                    : `<em style="color:var(--txt-light);font-size:0.85em;">N/A</em>`;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${t.nome}</td>
+                    <td>${t.cursos ? t.cursos.nome : '—'}</td>
+                    <td style="font-family:monospace;font-weight:700;letter-spacing:0.1em;">${t.codigo_turma}</td>
+                    <td>${codigoCursoExibido}</td>
+                    <td>${count ?? 0}</td>
+                    <td>
+                        <button type="button" class="btn-excluir" onclick="excluirTurma('${t.id}')">Excluir</button>
+                    </td>`;
+                tbody.appendChild(tr);
+            }
+        }
+
+        // 2. Popula #visao-turma-select
+        const visaoSelect = document.getElementById('visao-turma-select');
+        if (visaoSelect) {
+            visaoSelect.innerHTML = '<option value="">Selecione uma turma...</option>' +
+                turmasCache.map(t =>
+                    `<option value="${t.id}">${t.nome} — ${t.cursos ? t.cursos.nome : ''} (${t.codigo_turma})</option>`
+                ).join('');
+        }
+
+        // 3. Popula o select de curso no form de turmas (#turma-curso-select)
+        const turmaCursoSelect = document.getElementById('turma-curso-select');
+        if (turmaCursoSelect) {
+            const { data: cursos, error: errCurso } = await db
+                .from('cursos').select('id, nome, codigo_curso').order('nome');
+            if (!errCurso && cursos) {
+                turmaCursoSelect.innerHTML = '<option value="">Selecione um curso</option>' +
+                    cursos.map(c =>
+                        `<option value="${c.id}" data-codigo="${c.codigo_curso || ''}">${c.nome}${c.codigo_curso ? ` (CCC: ${c.codigo_curso})` : ''}</option>`
+                    ).join('');
+            }
+        }
+
+        // 4. Atualiza todos os turma-select do formulário de matrícula
+        document.querySelectorAll('.turma-select').forEach(sel => {
+            const entry = sel.closest('.curso-entry');
+            const cursoSel = entry ? entry.querySelector('.curso-select') : null;
+            const cursoId = cursoSel ? cursoSel.value : null;
+            popularTurmaSelect(sel, cursoId);
+        });
+
+    } catch (e) {
+        console.error('Erro ao carregar turmas:', e);
+    }
+}
+
+/**
+ * Popula um <select class="turma-select"> filtrando pelo cursoId.
+ * Se cursoId for null/vazio, mostra mensagem "Selecione o curso primeiro".
+ */
+function popularTurmaSelect(selectEl, cursoId) {
+    if (!selectEl) return;
+
+    if (!cursoId) {
+        selectEl.innerHTML = '<option value="" data-codigo-turma="" data-codigo-curso="">Selecione o curso primeiro</option>';
+        return;
+    }
+
+    const turmaDoCurso = turmasCache.filter(t => t.curso_id === cursoId);
+
+    if (turmaDoCurso.length === 0) {
+        selectEl.innerHTML = '<option value="" data-codigo-turma="" data-codigo-curso="">Nenhuma turma cadastrada para este curso</option>';
+        return;
+    }
+
+    selectEl.innerHTML = '<option value="" data-codigo-turma="" data-codigo-curso="">Selecione a turma</option>' +
+        turmaDoCurso.map(t => {
+            const cc = t.codigo_curso || '';
+            const ct = t.codigo_turma || '';
+            return `<option value="${t.id}" data-codigo-turma="${ct}" data-codigo-curso="${cc}">${t.nome} (${ct})</option>`;
+        }).join('');
+}
+
+/** Salva nova turma no banco */
+async function salvarTurma() {
+    const nome = document.getElementById('turma-nome').value.trim();
+    const cursoId = document.getElementById('turma-curso-select').value;
+    const codigoTurma = document.getElementById('turma-codigo').value.trim();
+
+    if (!nome || !cursoId || !codigoTurma) {
+        mostrarAlerta('Preencha todos os campos para cadastrar a turma.');
+        return;
+    }
+
+    if (!/^[0-9]{4}$/.test(codigoTurma)) {
+        mostrarAlerta('O código da turma deve conter exatamente 4 dígitos numéricos.');
+        return;
+    }
+
+    // Lê o código do curso do option selecionado
+    const cursoOption = document.getElementById('turma-curso-select').selectedOptions[0];
+    const codigoCurso = cursoOption ? (cursoOption.dataset.codigo || null) : null;
+
+    try {
+        const { error } = await db.from('turmas').insert({
+            nome,
+            curso_id: cursoId,
+            codigo_turma: codigoTurma,
+            codigo_curso: codigoCurso,
+            criado_por: usuarioLogado ? usuarioLogado.id : null
+        });
+
+        if (error) {
+            if (error.code === '23505') {
+                throw new Error(`Já existe uma turma com o código "${codigoTurma}" para este curso.`);
+            }
+            throw error;
+        }
+
+        document.getElementById('form-cadastro-turma').reset();
+        await carregarTurmas();
+        await carregarTurmasDisponiveis();
+        mostrarAlerta('Turma cadastrada com sucesso!', 'Sucesso');
+    } catch (e) {
+        mostrarAlerta(`Erro ao salvar turma: ${e.message}`);
+    }
+}
+
+/** Exclui uma turma */
+function excluirTurma(turmaId) {
+    mostrarConfirmacao(
+        'Tem certeza que deseja excluir esta turma? As matrículas vinculadas perderão o vínculo (turma_id = null).',
+        async () => {
+            try {
+                const { error } = await db.from('turmas').delete().eq('id', turmaId);
+                if (error) throw error;
+                await carregarTurmas();
+                await carregarTurmasDisponiveis();
+                mostrarAlerta('Turma excluída com sucesso!', 'Sucesso');
+            } catch (e) {
+                mostrarAlerta(`Erro ao excluir turma: ${e.message}`);
+            }
+        }
+    );
 }
 
 // ==================== CURSOS ====================
@@ -267,9 +445,13 @@ async function carregarCursos() {
                     ? curso.disciplinas.map(d => `${d.nome} (${d.carga_horaria}h)`).join(', ')
                     : '<em>Nenhuma</em>';
 
+                const codigoCurso = curso.codigo_curso
+                    ? `<span style="font-family:monospace; font-size:0.85em; background:var(--panel-off); padding:2px 6px; border-radius:4px; color:var(--txt-mid);">CCC: ${String(curso.codigo_curso).padStart(3,'0')}</span>`
+                    : '<em style="color:var(--txt-light);font-size:0.85em;">Sem código</em>';
+
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                <td>${curso.nome}</td>
+                <td>${curso.nome}<br>${codigoCurso}</td>
                 <td>${curso.duracao}</td>
                 <td>${disciplinasTexto}</td>
                 <td>
@@ -311,27 +493,36 @@ async function carregarCursos() {
 async function salvarCurso() {
     const nome = document.getElementById('nome-curso').value.trim();
     const duracao = document.getElementById('duracao-curso').value.trim();
+    const codigoCurso = (document.getElementById('codigo-curso')?.value || '').trim();
 
     if (!nome || !duracao) {
         mostrarAlerta('Preencha todos os campos do curso!');
         return;
     }
 
-    const { error } = await db.from('cursos').insert({
-        nome,
-        duracao,
-        criado_por: usuarioLogado.id
-    });
-
-    if (error) {
-        mostrarAlerta(`Erro ao salvar curso: ${error.message}`);
+    if (codigoCurso && !/^[0-9]{1,3}$/.test(codigoCurso)) {
+        mostrarAlerta('O código do curso deve conter apenas números (1 a 3 dígitos).');
         return;
     }
 
-    document.getElementById('nome-curso').value = '';
-    document.getElementById('duracao-curso').value = '';
-    await carregarCursos();
-    mostrarAlerta('Curso salvo com sucesso!', 'Sucesso');
+    try {
+        const { error } = await db.from('cursos').insert({
+            nome,
+            duracao,
+            codigo_curso: codigoCurso ? String(codigoCurso).padStart(3, '0') : null,
+            criado_por: usuarioLogado.id
+        });
+
+        if (error) throw error;
+
+        document.getElementById('nome-curso').value = '';
+        document.getElementById('duracao-curso').value = '';
+        if (document.getElementById('codigo-curso')) document.getElementById('codigo-curso').value = '';
+        await carregarCursos();
+        mostrarAlerta('Curso salvo com sucesso!', 'Sucesso');
+    } catch (e) {
+        mostrarAlerta(`Erro ao salvar curso: ${e.message}`);
+    }
 }
 
 async function salvarDisciplina() {
@@ -362,19 +553,29 @@ async function salvarDisciplina() {
 }
 
 async function abrirModalEditarCurso(cursoId) {
-    const { data: curso, error } = await db
-        .from('cursos')
-        .select('*')
-        .eq('id', cursoId)
-        .single();
+    try {
+        const { data: curso, error } = await db
+            .from('cursos')
+            .select('*')
+            .eq('id', cursoId)
+            .single();
 
-    if (error || !curso) return;
+        if (error) throw error;
+        if (!curso) return;
 
-    cursoEditandoId = cursoId;
-    document.getElementById('curso-index-editar').value = cursoId;
-    document.getElementById('curso-nome-editar').value = curso.nome;
-    document.getElementById('curso-duracao-editar').value = curso.duracao;
-    document.getElementById('modal-curso').classList.add('active');
+        cursoEditandoId = cursoId;
+        document.getElementById('curso-index-editar').value = cursoId;
+        document.getElementById('curso-nome-editar').value = curso.nome;
+        document.getElementById('curso-duracao-editar').value = curso.duracao;
+
+        const inputCodigo = document.getElementById('curso-codigo-editar');
+        if (inputCodigo) inputCodigo.value = curso.codigo_curso || '';
+
+        document.getElementById('modal-curso').classList.add('active');
+    } catch (e) {
+        console.error('Erro ao abrir modal de edição de curso:', e);
+        mostrarAlerta(`Erro ao carregar dados do curso: ${e.message}`);
+    }
 }
 
 function fecharModalCurso() {
@@ -387,25 +588,38 @@ async function salvarCursoModal() {
 
     const novoNome = document.getElementById('curso-nome-editar').value.trim();
     const novaDuracao = document.getElementById('curso-duracao-editar').value.trim();
+    const novoCodigo = (document.getElementById('curso-codigo-editar')?.value || '').trim();
 
     if (!novoNome || !novaDuracao) {
         mostrarAlerta('Preencha todos os campos!');
         return;
     }
 
-    const { error } = await db
-        .from('cursos')
-        .update({ nome: novoNome, duracao: novaDuracao })
-        .eq('id', cursoEditandoId);
-
-    if (error) {
-        mostrarAlerta(`Erro ao atualizar curso: ${error.message}`);
+    if (novoCodigo && !/^[0-9]{1,3}$/.test(novoCodigo)) {
+        mostrarAlerta('O código do curso deve conter apenas números (1 a 3 dígitos).');
         return;
     }
 
-    await carregarCursos();
-    fecharModalCurso();
-    mostrarAlerta('Curso atualizado com sucesso!', 'Sucesso');
+    try {
+        const updateData = {
+            nome: novoNome,
+            duracao: novaDuracao,
+            codigo_curso: novoCodigo ? String(novoCodigo).padStart(3, '0') : null
+        };
+
+        const { error } = await db
+            .from('cursos')
+            .update(updateData)
+            .eq('id', cursoEditandoId);
+
+        if (error) throw error;
+
+        await carregarCursos();
+        fecharModalCurso();
+        mostrarAlerta('Curso atualizado com sucesso!', 'Sucesso');
+    } catch (e) {
+        mostrarAlerta(`Erro ao atualizar curso: ${e.message}`);
+    }
 }
 
 function excluirCurso(cursoId) {
@@ -418,6 +632,48 @@ function excluirCurso(cursoId) {
             mostrarAlerta('Curso removido com sucesso!', 'Sucesso');
         }
     });
+}
+
+// ==================== GERAÇÃO DE RA COMPOSTO ====================
+/**
+ * Gera o RA composto no formato CCCTTTTAAAAA (12 dígitos, sem pontuação).
+ * Sempre salvo no banco SEM pontos.
+ */
+function gerarRA(codigoCurso, codigoTurma, sequencial) {
+    try {
+        if (!codigoCurso || !codigoTurma || !sequencial) {
+            throw new Error(`Dados insuficientes para gerar RA: codigoCurso=${codigoCurso}, codigoTurma=${codigoTurma}, sequencial=${sequencial}`);
+        }
+
+        const ccc   = String(codigoCurso).replace(/\D/g, '').padStart(3, '0').slice(-3);
+        const tttt  = String(codigoTurma).replace(/\D/g, '').padStart(4, '0').slice(-4);
+        const aaaaa = String(Math.floor(sequencial)).padStart(5, '0').slice(-5);
+
+        const ra = `${ccc}${tttt}${aaaaa}`;
+
+        if (ra.length !== 12) {
+            throw new Error(`RA gerado tem comprimento inválido: ${ra} (esperado 12 dígitos)`);
+        }
+
+        return ra; // sempre retorna SEM pontos (valor puro para o banco)
+    } catch (e) {
+        console.error('Erro ao gerar RA:', e);
+        return null;
+    }
+}
+
+/**
+ * Formata o RA puro de 12 dígitos para exibição visual: CCC.TTTT.AAAAA
+ * Ex.: "250250000001" → "250.2500.00001"
+ * Mantém o valor puro no banco, apenas formata para o frontend.
+ * @param {string|null} ra - String de 12 dígitos ou null/vazio
+ * @returns {string} RA formatado ou '-' se inválido
+ */
+function formatarRA(ra) {
+    if (!ra) return '-';
+    const s = String(ra).replace(/\D/g, ''); // remove qualquer pontuação residual
+    if (s.length !== 12) return ra; // retorna como está se não tiver 12 dígitos
+    return `${s.slice(0, 3)}.${s.slice(3, 7)}.${s.slice(7)}`;
 }
 
 // ==================== ALUNOS ====================
@@ -444,14 +700,28 @@ async function matricularAluno() {
 
         for (const entry of cursosEntries) {
             const cursoId = entry.querySelector('.curso-select').value;
-            const turma = entry.querySelector('.turma-input').value.trim();
+
+            // Captura a turma via SELECT (já traz id, codigo_turma e codigo_curso via dataset)
+            const turmaSelect = entry.querySelector('.turma-select');
+            const turmaId = turmaSelect ? turmaSelect.value : null;
+            const codigoTurmaOpt = turmaSelect ? (turmaSelect.selectedOptions[0]?.dataset.codigoTurma || '') : '';
+            const codigoCursoOpt = turmaSelect ? (turmaSelect.selectedOptions[0]?.dataset.codigoCurso || '') : '';
+
             const valorInputVal = entry.querySelector('.valor-input').value;
             const valor = parseMoeda(valorInputVal);
+
+            // Captura os campos de pagamento individuais deste entry
+            const formaPag = entry.querySelector('.forma-pagamento-select')?.value || 'a-vista';
+            const metodoAvista = entry.querySelector('.metodo-pagamento-select')?.value || 'Pix';
+            const metodoParcelado = entry.querySelector('.metodo-parcelamento-select')?.value || 'Boleto';
+            const numParcelasStr = entry.querySelector('.numero-parcelas-select')?.value || '1';
+            const numParcelas = formaPag === 'parcelado' ? parseInt(numParcelasStr) : 1;
+            const metodoPagamento = formaPag === 'parcelado' ? metodoParcelado : metodoAvista;
 
             const contratoInput = entry.querySelector('.contrato-input');
             const arquivoContrato = contratoInput && contratoInput.files[0] ? contratoInput.files[0] : null;
 
-            if (!cursoId || !turma || isNaN(valor) || !valorInputVal) {
+            if (!cursoId || !turmaId || isNaN(valor) || !valorInputVal) {
                 throw new Error('Preencha corretamente o Curso, a Turma e o Valor para todos os cursos adicionados.');
             }
 
@@ -464,14 +734,23 @@ async function matricularAluno() {
                 contratoBase64 = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result);
-                    reader.onerror = error => reject(error);
+                    reader.onerror = err => reject(err);
                     reader.readAsDataURL(arquivoContrato);
                 });
             } catch (e) {
                 throw new Error('Falha ao ler o arquivo PDF anexado. Tente enviar novamente.');
             }
 
-            cursosSelecionados.push({ cursoId, turma, valor, contratoBase64 });
+            cursosSelecionados.push({
+                cursoId, turmaId,
+                codigoTurma: codigoTurmaOpt,
+                codigoCurso: codigoCursoOpt,
+                valor,
+                contratoBase64,
+                formaPagamento: formaPag,
+                metodoPagamento,
+                numeroParcelas: numParcelas
+            });
             valorTotal += valor;
         }
 
@@ -479,97 +758,222 @@ async function matricularAluno() {
             throw new Error('Adicione pelo menos um curso para realizar a matrícula.');
         }
 
-        const formaPagamento = document.getElementById('forma-pagamento').value;
-        const numeroParcelas = formaPagamento === 'parcelado'
-            ? parseInt(document.getElementById('numero-parcelas').value)
-            : 1;
-
-        // Verifica CPF duplicado
-        const { data: cpfExiste, error: errCpf } = await db.from('alunos').select('id').eq('cpf', cpf).maybeSingle();
-        if (errCpf) throw new Error(`Erro de conexão ao verificar CPF: ${errCpf.message}`);
-        if (cpfExiste) throw new Error('Já existe um aluno cadastrado com este CPF.');
-
+        // valorTotal ainda usado para compatibilidade
         const dataMatricula = new Date().toISOString().split('T')[0];
 
-        // Para legado, pegar dados do primeiro curso para salvar na tabela principal "alunos"
-        const primeiroCurso = cursosSelecionados[0];
-        const { data: cursoData, error: errCursoData } = await db
-            .from('cursos')
-            .select('nome')
-            .eq('id', primeiroCurso.cursoId)
-            .single();
-
-        if (errCursoData) throw new Error(`Erro ao buscar dados do curso: ${errCursoData.message}`);
-
-        // 1. Insere o aluno
-        const { data: novoAluno, error: erroAluno } = await db
+        // ── NOVA LÓGICA DE CPF ─────────────────────────────────────
+        // 1. Verifica se o CPF já existe no sistema
+        const { data: alunoExistente, error: errCpf } = await db
             .from('alunos')
-            .insert({
-                nome,
-                cpf,
-                curso_id: primeiroCurso.cursoId,
-                curso_nome: cursoData ? cursoData.nome : '',
-                turma: primeiroCurso.turma,
-                valor: valorTotal,
-                forma_pagamento: formaPagamento,
-                data_matricula: dataMatricula,
-                criado_por: usuarioLogado ? usuarioLogado.id : null
-            })
-            .select()
-            .single();
+            .select('id, nome, cpf, curso_id, curso_nome')
+            .eq('cpf', cpf)
+            .maybeSingle();
 
-        if (erroAluno) throw new Error(`Erro de conexão ao cadastrar aluno: ${erroAluno.message}`);
+        if (errCpf) throw new Error(`Erro de conexão ao verificar CPF: ${errCpf.message}`);
 
-        // 2. Insere na tabela matriculas
+        let alunoId;
+        let primeiroCursoLegado;
+
+        if (alunoExistente) {
+            // ── CPF JÁ EXISTE: reaproveitamento do aluno ──────────────
+            console.info(`CPF encontrado: reaproveitando aluno ID ${alunoExistente.id} (${alunoExistente.nome})`);
+            alunoId = alunoExistente.id;
+            primeiroCursoLegado = { cursoId: alunoExistente.curso_id, cursoNome: alunoExistente.curso_nome };
+
+            // Verifica se já está matriculado em algum dos cursos selecionados
+            for (const item of cursosSelecionados) {
+                const { data: matriculaExistente, error: errMat } = await db
+                    .from('matriculas')
+                    .select('id')
+                    .eq('aluno_id', alunoId)
+                    .eq('curso_id', item.cursoId)
+                    .maybeSingle();
+
+                if (errMat) throw new Error(`Erro ao verificar matrícula: ${errMat.message}`);
+
+                if (matriculaExistente) {
+                    // Busca nome do curso para mostrar na mensagem
+                    const { data: cursoInfo } = await db.from('cursos').select('nome').eq('id', item.cursoId).single();
+                    throw new Error(`Este aluno já está matriculado no curso "${cursoInfo?.nome || item.cursoId}".`);
+                }
+            }
+        } else {
+            // ── CPF NOVO: inserir apenas na tabela alunos ─────────────────
+            //
+            // IMPORTANTE: NÃO chamamos auth.signUp() aqui.
+            // Razão: o Client SDK do Supabase não suporta criar um usuário Auth
+            // enquanto outro já está com sessão ativa (retorna "Database error
+            // saving new user"). Isso é uma limitação do browser client.
+            //
+            // Solução adotada (100% frontend):
+            //   1. A secretaria grava apenas em public.alunos (sem Auth).
+            //   2. O email sintético é calculado e salvo como referência.
+            //   3. No portal do aluno, o primeiro login chama signUp() com as
+            //      credenciais sintéticas, criando a conta Auth naquele momento,
+            //      e depois faz signIn normalmente nas visitas seguintes.
+
+            const cpfNumeros     = cpf.replace(/\D/g, '');
+            const emailSintetico = `${cpfNumeros}@aluno.mindrecall.com.br`;
+
+            const primeiroCurso = cursosSelecionados[0];
+            const { data: cursoData, error: errCursoData } = await db
+                .from('cursos')
+                .select('nome')
+                .eq('id', primeiroCurso.cursoId)
+                .single();
+
+            if (errCursoData) throw new Error(`Erro ao buscar dados do curso: ${errCursoData.message}`);
+
+            const { data: novoAluno, error: erroAluno } = await db
+                .from('alunos')
+                .insert({
+                    nome,
+                    cpf,
+                    email_sintetico: emailSintetico,
+                    curso_id:        primeiroCurso.cursoId,
+                    curso_nome:      cursoData ? cursoData.nome : '',
+                    turma:           primeiroCurso.codigoTurma,
+                    valor:           valorTotal,
+                    data_matricula:  dataMatricula,
+                    criado_por:      usuarioLogado ? usuarioLogado.id : null
+                })
+                .select()
+                .single();
+
+            if (erroAluno) throw new Error(`Erro de conexão ao cadastrar aluno: ${erroAluno.message}`);
+
+            alunoId = novoAluno.id;
+            primeiroCursoLegado = { cursoId: primeiroCurso.cursoId, cursoNome: cursoData?.nome || '' };
+        }
+
+
+        // ── GERAR RA E INSERIR NA TABELA MATRICULAS ────────────────
+        let primeiroRaGerado = null;
+
         for (const item of cursosSelecionados) {
-            const { error: erroMatricula } = await db.from('matriculas').insert({
-                aluno_id: novoAluno.id,
-                curso_id: item.cursoId,
-                turma: item.turma,
-                contrato_url: item.contratoBase64,
-                data_matricula: dataMatricula,
-                criado_por: usuarioLogado ? usuarioLogado.id : null
-            });
+            // Os dados do curso (codigo_curso) e da turma (codigo_turma, turma_id)
+            // já foram capturados no loop anterior via dataset do <select>
+            const codigoCurso = item.codigoCurso;
+            const codigoTurma = item.codigoTurma;
+            const turmaId     = item.turmaId;
+
+            // Conta matrículas existentes nesta turma para gerar o sequencial
+            const { count: totalNaTurma, error: errCount } = await db
+                .from('matriculas')
+                .select('id', { count: 'exact', head: true })
+                .eq('turma_id', turmaId);
+
+            if (errCount) throw new Error(`Erro ao contar alunos na turma: ${errCount.message}`);
+
+            const sequencial = (totalNaTurma || 0) + 1;
+
+            // Gera o RA composto a partir dos dados capturados do SELECT
+            const raGerado = gerarRA(codigoCurso, codigoTurma, sequencial);
+
+            if (!raGerado) {
+                console.warn(`RA não gerado: curso sem código configurado (CCC ausente).`);
+            }
+
+            if (!primeiroRaGerado && raGerado) primeiroRaGerado = raGerado;
+
+            // INSERT na tabela matriculas e captura o ID gerado para vincular pagamentos
+            const { data: novaMatricula, error: erroMatricula } = await db
+                .from('matriculas')
+                .insert({
+                    aluno_id:     alunoId,
+                    curso_id:     item.cursoId,
+                    turma_id:     turmaId,
+                    turma:        codigoTurma,
+                    codigo_turma: codigoTurma,
+                    ra:           raGerado || null,
+                    contrato_url: item.contratoBase64,
+                    data_matricula: dataMatricula,
+                    criado_por:   usuarioLogado ? usuarioLogado.id : null
+                })
+                .select('id')
+                .single();
+
             if (erroMatricula) throw new Error(`Erro ao criar vínculo de matrícula: ${erroMatricula.message}`);
+
+            // Guarda o matricula_id gerado dentro do próprio item para uso no loop financeiro
+            item._matriculaId = novaMatricula?.id || null;
         }
 
-        // 3. Insere as parcelas na tabela financeiro
-        const parcelas = gerarParcelas(valorTotal, numeroParcelas, dataMatricula, novoAluno.id);
+        // Atualiza o RA legado na tabela alunos (último RA gerado)
+        if (primeiroRaGerado) {
+            const { error: errRaUpdate } = await db
+                .from('alunos')
+                .update({ ra: primeiroRaGerado })
+                .eq('id', alunoId);
 
-        if (parcelas.length > 0) {
-            const { error: erroFin } = await db.from('financeiro').insert(parcelas);
-            if (erroFin) throw new Error(`Erro ao gerar parcelas no financeiro: ${erroFin.message}`);
+            if (errRaUpdate) {
+                console.error('Aviso: Não foi possível atualizar o RA legado no aluno:', errRaUpdate);
+                // Não lança erro pois a matrícula já foi criada com sucesso
+            }
         }
 
-        // Lançamento Automático se for "À Vista"
-        if (formaPagamento === 'a-vista') {
-            const metodo = document.getElementById('metodo-pagamento').value;
-            const { error: erroPag } = await db.from('pagamentos').insert({
-                aluno_id: novoAluno.id,
-                curso_id: primeiroCurso.cursoId,
-                valor_pago: valorTotal,
-                forma_pagamento: metodo,
-                status: 'Pago',
-                data_pagamento: dataMatricula,
-                criado_por: usuarioLogado ? usuarioLogado.id : null
-            });
-            if (erroPag) throw new Error(`Erro ao lançar pagamento à vista: ${erroPag.message}`);
+        // ── FINANCEIRO POR CURSO ────────────────────────────────────
+        // Cada item carrega seu próprio cursoId, valor, formaPagamento e
+        // o _matriculaId capturado no loop anterior — sem reutilizar variáveis globais.
+        for (const item of cursosSelecionados) {
+            const matriculaId = item._matriculaId || null;
+            const cursoId     = item.cursoId;
+
+            // Gera parcelas vinculadas ao curso e matrícula específicos
+            const parcelas = gerarParcelas(
+                item.valor, item.numeroParcelas, dataMatricula,
+                alunoId, cursoId, matriculaId
+            );
+
+            if (parcelas.length > 0) {
+                const { error: erroFin } = await db.from('financeiro').insert(parcelas);
+                if (erroFin) throw new Error(`Erro ao gerar parcelas no financeiro (curso ${cursoId}): ${erroFin.message}`);
+            }
+
+            // Pagamento à vista: vincula matricula_id e curso_id corretos
+            if (item.formaPagamento === 'a-vista') {
+                const { error: erroPag } = await db.from('pagamentos').insert({
+                    aluno_id:        alunoId,
+                    curso_id:        cursoId,
+                    matricula_id:    matriculaId,
+                    valor_pago:      item.valor,
+                    forma_pagamento: item.metodoPagamento,
+                    status:          'Pago',
+                    data_pagamento:  dataMatricula,
+                    criado_por:      usuarioLogado ? usuarioLogado.id : null
+                });
+                if (erroPag) throw new Error(`Erro ao lançar pagamento à vista (curso ${cursoId}): ${erroPag.message}`);
+            }
         }
 
-        // 4. Limpeza da UI e Atualização Real-Time
+        // ── LIMPEZA DA UI ──────────────────────────────────────────
         document.getElementById('form-secretaria').reset();
-        document.getElementById('parcelas-container').style.display = 'none';
-        document.getElementById('metodo-pagamento-container').style.display = 'flex';
 
-        // Remove os cursos adicionais, deixando apenas o original limpo
         const container = document.getElementById('cursos-container');
         const extraEntries = container.querySelectorAll('.curso-entry:not(:first-child)');
         extraEntries.forEach(el => el.remove());
 
-        // Recarrega as tabelas para refletir o novo aluno imediatamente
+        // Reseta o turma-select do primeiro entry
+        const primeiroTurmaSelect = container.querySelector('.turma-select');
+        popularTurmaSelect(primeiroTurmaSelect, null);
+
+        // Reseta os campos de pagamento do primeiro entry para padrão
+        const primeiroEntry = container.querySelector('.curso-entry');
+        if (primeiroEntry) {
+            const fpSel = primeiroEntry.querySelector('.forma-pagamento-select');
+            if (fpSel) fpSel.value = 'a-vista';
+            primeiroEntry.querySelector('.metodo-avista-container')?.style.setProperty('display', '');
+            primeiroEntry.querySelector('.metodo-parcelado-container')?.style.setProperty('display', 'none');
+            primeiroEntry.querySelector('.numero-parcelas-container')?.style.setProperty('display', 'none');
+        }
+
         await carregarAlunos();
 
-        mostrarAlerta('Aluno cadastrado e matriculado com sucesso!', 'Sucesso');
+        const mensagemSucesso = alunoExistente
+            ? `Nova matrícula adicionada ao aluno "${alunoExistente.nome}" com sucesso!${primeiroRaGerado ? ` RA: ${formatarRA(primeiroRaGerado)}` : ''}`
+            : `Aluno cadastrado e matriculado com sucesso!${primeiroRaGerado ? ` RA: ${formatarRA(primeiroRaGerado)}` : ''}`;
+
+        mostrarAlerta(mensagemSucesso, 'Sucesso');
 
     } catch (e) {
         console.error('Erro no fluxo de matrícula:', e);
@@ -579,7 +983,11 @@ async function matricularAluno() {
     }
 }
 
-function gerarParcelas(valorTotal, numeroParcelas, dataMatricula, alunoId) {
+/**
+ * Gera o array de parcelas para inserção na tabela `financeiro`.
+ * Agora recebe cursoId e matriculaId para vincular cada parcela ao curso certo.
+ */
+function gerarParcelas(valorTotal, numeroParcelas, dataMatricula, alunoId, cursoId = null, matriculaId = null) {
     const parcelas = [];
     const valorParcela = valorTotal / numeroParcelas;
 
@@ -587,14 +995,20 @@ function gerarParcelas(valorTotal, numeroParcelas, dataMatricula, alunoId) {
         const vencimento = new Date(dataMatricula + 'T12:00:00');
         vencimento.setDate(vencimento.getDate() + (i * 30));
 
-        parcelas.push({
-            aluno_id: alunoId,
+        const parcela = {
+            aluno_id:       alunoId,
             numero_parcela: i + 1,
             total_parcelas: numeroParcelas,
-            valor: parseFloat(valorParcela.toFixed(2)),
-            vencimento: vencimento.toISOString().split('T')[0],
-            paga: false
-        });
+            valor:          parseFloat(valorParcela.toFixed(2)),
+            vencimento:     vencimento.toISOString().split('T')[0],
+            paga:           false
+        };
+
+        // Vincula ao curso e matrícula específicos quando disponíveis
+        if (cursoId)     parcela.curso_id     = cursoId;
+        if (matriculaId) parcela.matricula_id = matriculaId;
+
+        parcelas.push(parcela);
     }
     return parcelas;
 }
@@ -664,23 +1078,42 @@ async function carregarAlunos() {
                     }
                 }
 
-                // Monta chips de cursos (via tabela matriculas)
+                // Monta chips de cursos com RA individual por matrícula (Ponto 3)
                 const matriculas = aluno.matriculas || [];
                 let cursosHtml;
                 if (matriculas.length > 0) {
-                    cursosHtml = `<div class="cursos-chips">${matriculas.map(m => `<span class="curso-chip">${m.cursos ? m.cursos.nome : '-'}</span>`).join('')
-                        }</div>`;
+                    cursosHtml = `<div class="cursos-chips">${matriculas.map(m => {
+                        const nomeCurso = m.cursos ? m.cursos.nome : '-';
+                        const raFormatado = m.ra ? ` <span style="font-family:monospace;font-size:0.78em;color:var(--txt-light);white-space:nowrap;">RA: ${formatarRA(m.ra)}</span>` : '';
+                        return `<span class="curso-chip" style="display:inline-flex;align-items:center;gap:4px;">${nomeCurso}${raFormatado}</span>`;
+                    }).join('')}</div>`;
                 } else {
                     cursosHtml = aluno.curso_nome || '-';
                 }
 
+                // Coluna Turma: exibe badges de todas as turmas das matrículas
+                let turmasHtml;
+                if (matriculas.length > 0) {
+                    const turmasUnicas = [...new Map(
+                        matriculas
+                            .filter(m => m.codigo_turma || m.turma)
+                            .map(m => [m.codigo_turma || m.turma, m])
+                    ).values()];
+                    turmasHtml = turmasUnicas.length > 0
+                        ? `<div class="cursos-chips">${turmasUnicas.map(m =>
+                            `<span class="curso-chip" style="font-family:monospace;font-size:0.85em;">${m.codigo_turma || m.turma}</span>`
+                          ).join('')}</div>`
+                        : '-';
+                } else {
+                    turmasHtml = aluno.turma || '-';
+                }
+
                 const tr = document.createElement('tr');
-                const raText = aluno.ra ? ` - RA: ${aluno.ra}` : '';
                 tr.innerHTML = `
-                <td><strong>${aluno.nome}</strong><span style="color:var(--txt-light); font-size: 0.85em;">${raText}</span></td>
+                <td><strong>${aluno.nome}</strong></td>
                 <td>${aluno.cpf || '-'}</td>
                 <td>${cursosHtml}</td>
-                <td>${aluno.turma || '-'}</td>
+                <td>${turmasHtml}</td>
                 <td>${parcelas.length > 0
                     ? `<span class="badge ${badgeClass}">${statusParcelas}</span>`
                     : `<span style="color:var(--txt-light); font-size:0.85em;">Sem boletos</span>`
@@ -706,20 +1139,22 @@ async function carregarAlunos() {
                     if (partes.length === 3) dataFormatada = `${partes[2]}/${partes[1]}/${partes[0]}`;
                 }
 
-                // Monta lista de cursos da secretaria
+                // Monta lista de cursos com RA por matrícula (Ponto 3)
                 const matriculas = aluno.matriculas || [];
                 let cursosTexto;
                 if (matriculas.length > 0) {
-                    cursosTexto = `<div class="cursos-chips">${matriculas.map(m => `<span class="curso-chip">${m.cursos ? m.cursos.nome : '-'}</span>`).join('')
-                        }</div>`;
+                    cursosTexto = `<div class="cursos-chips">${matriculas.map(m => {
+                        const nomeCurso = m.cursos ? m.cursos.nome : '-';
+                        const raFormatado = m.ra ? ` <span style="font-family:monospace;font-size:0.78em;color:var(--txt-light);white-space:nowrap;">RA: ${formatarRA(m.ra)}</span>` : '';
+                        return `<span class="curso-chip" style="display:inline-flex;align-items:center;gap:4px;">${nomeCurso}${raFormatado}</span>`;
+                    }).join('')}</div>`;
                 } else {
                     cursosTexto = aluno.curso_nome || '-';
                 }
 
                 const tr = document.createElement('tr');
-                const raText = aluno.ra ? ` - RA: ${aluno.ra}` : '';
                 tr.innerHTML = `
-                <td><strong>${aluno.nome}</strong><span style="color:var(--txt-light); font-size: 0.85em;">${raText}</span></td>
+                <td><strong>${aluno.nome}</strong></td>
                 <td>${aluno.cpf || '-'}</td>
                 <td>${cursosTexto}</td>
                 <td>${dataFormatada}</td>
@@ -754,55 +1189,102 @@ function excluirAluno(alunoId) {
 }
 
 async function abrirModalAluno(alunoId) {
-    // Busca o aluno com todos os dados
-    const { data: aluno, error } = await db
-        .from('alunos')
-        .select('*, matriculas(*, cursos(nome))')
-        .eq('id', alunoId)
-        .single();
+    try {
+        // Busca o aluno com todos os dados, incluindo documento_rg
+        const { data: aluno, error } = await db
+            .from('alunos')
+            .select('*, documento_rg, matriculas(*, cursos(nome))')
+            .eq('id', alunoId)
+            .single();
 
-    if (error || !aluno) return;
+        if (error) throw error;
+        if (!aluno) return;
 
-    // Elementos da Ficha
-    const setValue = (id, value) => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.textContent = value && value.trim() !== '' ? value : 'Pendente';
-            el.style.color = (value && value.trim() !== '') ? 'var(--txt-dark)' : 'var(--txt-light)';
+        alunoEditando = aluno;
+
+        // Helper para campos de texto simples
+        const setValue = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value && String(value).trim() !== '' ? value : 'Pendente';
+                el.style.color = (value && String(value).trim() !== '') ? 'var(--txt-dark)' : 'var(--txt-light)';
+            }
+        };
+
+        // Dados Acadêmicos
+        setValue('ficha-nome', aluno.nome);
+        // Exibe RA da matrícula mais recente na ficha (campo ficha-ra) formatado
+        const primeiraMatricula = (aluno.matriculas || []).find(m => m.ra);
+        setValue('ficha-ra', primeiraMatricula ? formatarRA(primeiraMatricula.ra) : (aluno.ra ? formatarRA(aluno.ra) : ''));
+        setValue('ficha-cpf', aluno.cpf);
+
+        // Cursos — renderiza lista completa de matrículas (histórico)
+        const raMatriculas = aluno.matriculas || [];
+        const fichaEl = document.getElementById('ficha-curso');
+        if (fichaEl) {
+            if (raMatriculas.length > 0) {
+                const cursosHtml = raMatriculas.map((m, idx) => {
+                    const nomeCurso = m.cursos ? m.cursos.nome : 'Curso não identificado';
+                    const raFormatado = m.ra ? `<span style="font-family:monospace; font-size:0.78em; color:var(--txt-light); margin-left:6px;">RA: ${formatarRA(m.ra)}</span>` : '';
+                    const turmaInfo = m.codigo_turma || m.turma ? ` — Turma: ${m.codigo_turma || m.turma}` : '';
+                    return `<div style="display:flex; align-items:center; gap:4px; margin-bottom:${idx < raMatriculas.length - 1 ? '4px' : '0'};"><span class="curso-chip" style="margin:0;">${nomeCurso}${turmaInfo}</span>${raFormatado}</div>`;
+                }).join('');
+                fichaEl.innerHTML = cursosHtml;
+                fichaEl.style.color = 'var(--txt-dark)';
+            } else {
+                const fallback = aluno.curso_nome || '';
+                fichaEl.textContent = fallback || 'Pendente';
+                fichaEl.style.color = fallback ? 'var(--txt-dark)' : 'var(--txt-light)';
+            }
         }
-    };
 
-    // Dados Acadêmicos
-    setValue('ficha-nome', aluno.nome);
-    setValue('ficha-ra', aluno.ra ? String(aluno.ra) : '');
-    setValue('ficha-cpf', aluno.cpf);
-    
-    // Cursos - junta todos em string caso haja múltiplos
-    const matriculas = aluno.matriculas || [];
-    let nomesCursos = matriculas.map(m => m.cursos ? m.cursos.nome : '').filter(Boolean).join(', ');
-    if (!nomesCursos) nomesCursos = aluno.curso_nome || ''; // Legado fallback
-    setValue('ficha-curso', nomesCursos);
+        // Contato
+        setValue('ficha-telefone', aluno.telefone);
+        setValue('ficha-telefone2', aluno.telefone_secundario);
+        setValue('ficha-email', aluno.email);
 
-    // Contato
-    setValue('ficha-telefone', aluno.telefone);
-    setValue('ficha-telefone2', aluno.telefone_secundario);
-    setValue('ficha-email', aluno.email);
+        // Endereço
+        setValue('ficha-cep', aluno.cep);
+        setValue('ficha-logradouro', aluno.logradouro);
+        setValue('ficha-numero', aluno.numero);
+        setValue('ficha-bairro', aluno.bairro);
+        setValue('ficha-cidade', aluno.cidade_uf);
 
-    // Endereço
-    setValue('ficha-cep', aluno.cep);
-    setValue('ficha-logradouro', aluno.logradouro);
-    setValue('ficha-numero', aluno.numero);
-    setValue('ficha-bairro', aluno.bairro);
-    setValue('ficha-cidade', aluno.cidade_uf);
+        // ── Seção Documentos — RG / CNH ──────────────────────────────
+        const fichaDocEl = document.getElementById('ficha-documento-rg');
+        if (fichaDocEl) {
+            if (aluno.documento_rg && aluno.documento_rg.trim() !== '') {
+                // Documento disponível: exibe botão para abrir/baixar
+                fichaDocEl.innerHTML = `
+                    <a
+                        href="${aluno.documento_rg}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="btn-action"
+                        style="display:inline-flex; align-items:center; gap:6px; padding:8px 16px; text-decoration:none; font-size:0.85rem;"
+                        title="Abrir/baixar o documento de identidade"
+                    >
+                        📄 Ver Documento
+                    </a>`;
+            } else {
+                // Documento pendente
+                fichaDocEl.innerHTML = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600;">⏳ Pendente de Envio</span>`;
+            }
+        }
 
-    // Lógica do Banner de Alerta Onboarding
-    const alerta = document.getElementById('alerta-onboarding');
-    const estaPendente = !aluno.telefone || !aluno.cep || !aluno.email;
-    if (alerta) {
-        alerta.style.display = estaPendente ? 'flex' : 'none';
+        // Banner de Alerta Onboarding
+        const alerta = document.getElementById('alerta-onboarding');
+        const estaPendente = !aluno.telefone || !aluno.cep || !aluno.email;
+        if (alerta) {
+            alerta.style.display = estaPendente ? 'flex' : 'none';
+        }
+
+        document.getElementById('modal-aluno').classList.add('active');
+
+    } catch (e) {
+        console.error('Erro ao abrir ficha do aluno:', e);
+        mostrarAlerta(`Erro ao carregar ficha do aluno: ${e.message}`);
     }
-
-    document.getElementById('modal-aluno').classList.add('active');
 }
 
 function fecharModalAluno() {
@@ -947,14 +1429,18 @@ async function carregarAlunosDiario() {
             const n2 = m.nota2 !== null && m.nota2 !== undefined ? m.nota2 : null;
             const media = m.media !== null && m.media !== undefined ? m.media : null;
 
-            const status = media !== null ? (media >= 7 ? 'Aprovado' : 'Em Recuperação') : '-';
-            const badgeClass = media !== null ? (media >= 7 ? 'badge-aprovado' : 'badge-recuperacao') : '';
+            // Status: Aprovado (≥7) ou Reprovado (<7). "Em Recuperação" foi descontinuado.
+            const status = media !== null ? (media >= 7 ? 'Aprovado' : 'Reprovado') : '-';
+            const badgeClass = media !== null ? (media >= 7 ? 'badge-aprovado' : 'badge-reprovado') : '';
+
+            // Exibe o RA da matrícula (composto) ou o RA legado do aluno
+            const raExibido = m.ra || (m.alunos && m.alunos.ra) || '-';
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${nomeAluno}</td>
+                <td>${nomeAluno}<br><span style="font-size:0.78em; color:var(--txt-light); font-family:monospace;">RA: ${raExibido}</span></td>
                 <td>${nomeCurso}</td>
-                <td>${m.turma || '-'}</td>
+                <td>${m.codigo_turma || m.turma || '-'}</td>
                 <td>${n1 !== null ? n1 : '-'}</td>
                 <td>${n2 !== null ? n2 : '-'}</td>
                 <td><strong>${media !== null ? parseFloat(media).toFixed(1) : '-'}</strong></td>
@@ -1094,46 +1580,58 @@ async function carregarFinanceiro() {
     if (emptyMsg) emptyMsg.style.display = 'none';
 
     try {
+        // pagamentos: JOIN matriculas→cursos para nome e RA corretos por registro.
+        // Fallback via curso_id→cursos(nome) para pagamentos sem matricula_id.
         const { data: pagamentos, error: errPag } = await db
             .from('pagamentos')
-            .select('*, alunos(nome, ra), cursos(nome)');
+            .select('*, alunos(nome), matriculas(id, ra, cursos(nome)), cursos(nome)');
 
-        const pagamentosNormalizados = (pagamentos || []).map(p => ({ ...p, _tabela: 'pagamentos' }));
+        if (errPag) throw errPag;
 
+        const pagamentosNormalizados = (pagamentos || []).map(p => {
+            // Prioridade: curso via matricula vinculada (mais preciso)
+            // Fallback: cursos direto via curso_id (para registros antigos sem matricula_id)
+            const mat = Array.isArray(p.matriculas) ? p.matriculas[0] : p.matriculas;
+            const nomeCurso = mat?.cursos?.nome || p.cursos?.nome || '-';
+            const raMatricula = mat?.ra || null;
+
+            return {
+                ...p,
+                _tabela: 'pagamentos',
+                _ra:     raMatricula,
+                cursos:  { nome: nomeCurso }
+            };
+        });
+
+        // boletos: lê curso_id e matricula_id para resolver nome do curso correto
         const { data: boletos, error: errBol } = await db
             .from('financeiro')
-            .select('*, alunos(nome, ra, curso_nome)');
+            .select('*, alunos(nome), matriculas(ra, cursos(nome)), cursos(nome)');
 
         if (errBol) throw errBol;
 
         const hoje = new Date().toISOString().split('T')[0];
-        
+
         const boletosNormalizados = (boletos || []).map(b => {
             let statusBol = b.paga ? 'Pago' : (b.vencimento < hoje ? 'Atrasado' : 'Pendente');
 
-            // Resolve o nome do curso: tenta via matriculas (novo schema) ou curso_nome (legado)
-            let nomeCurso = '-';
-            if (b.alunos?.curso_nome) {
-                nomeCurso = b.alunos.curso_nome;
-            }
-            
+            const mat = Array.isArray(b.matriculas) ? b.matriculas[0] : b.matriculas;
+            // Prioridade: nome via matricula→cursos (preciso) → cursos direto → campo legado
+            const nomeCurso = mat?.cursos?.nome || b.cursos?.nome || b.alunos?.curso_nome || '-';
+            const raMatricula = mat?.ra || null;
+
             return {
-                id: b.id,
-                _tabela: 'financeiro',
-                aluno_id: b.aluno_id,
-                curso_id: null,
-                valor_pago: b.valor,
+                id:              b.id,
+                _tabela:         'financeiro',
+                aluno_id:        b.aluno_id,
+                valor_pago:      b.valor,
                 forma_pagamento: 'Boleto',
-                data_pagamento: b.vencimento,
-                status: statusBol,
-                observacao: `Parcela ${b.numero_parcela}/${b.total_parcelas}`,
-                alunos: {
-                    nome: b.alunos?.nome,
-                    ra: b.alunos?.ra
-                },
-                cursos: {
-                    nome: nomeCurso
-                }
+                data_pagamento:  b.vencimento,
+                status:          statusBol,
+                observacao:      `Parcela ${b.numero_parcela}/${b.total_parcelas}`,
+                alunos:          { nome: b.alunos?.nome },
+                cursos:          { nome: nomeCurso },
+                _ra:             raMatricula
             };
         });
 
@@ -1195,6 +1693,15 @@ function renderizarTabelaPagamentos(lista) {
     lista.forEach(pag => {
         const nomeAluno = pag.alunos ? pag.alunos.nome : '-';
         const nomeCurso = pag.cursos ? pag.cursos.nome : '-';
+
+        // Tenta resolver o RA da matrícula vinculada ao pagamento
+        // pagamentos novos trazem matriculas!left(ra); boletos usam _ra
+        const raRaw = pag._ra ?? pag.matriculas?.ra ?? null;
+        const raFormatado = raRaw ? formatarRA(raRaw) : null;
+        const cursoExibido = raFormatado
+            ? `${nomeCurso} <span style="font-family:monospace;font-size:0.78em;color:var(--txt-light);">(RA: ${raFormatado})</span>`
+            : nomeCurso;
+
         const valor = parseFloat(pag.valor_pago || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const data = pag.data_pagamento
             ? (() => { const [y, m, d] = pag.data_pagamento.split('-'); return `${d}/${m}/${y}`; })()
@@ -1203,7 +1710,7 @@ function renderizarTabelaPagamentos(lista) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><strong>${nomeAluno}</strong></td>
-            <td>${nomeCurso}</td>
+            <td>${cursoExibido}</td>
             <td class="valor-pago-cell">R$ ${valor}</td>
             <td>${getBadgeForma(pag.forma_pagamento)}</td>
             <td>${data}</td>
@@ -1771,32 +2278,89 @@ function configurarEventos() {
         aplicarMascaraMoeda(this);
     });
 
+    // Listener: quando o curso muda no primeiro entry, filtra turmas
+    const primeiroCursoSelect = document.querySelector('.curso-select');
+    const primeiroTurmaSelect = document.querySelector('.turma-select');
+    primeiroCursoSelect?.addEventListener('change', function () {
+        popularTurmaSelect(primeiroTurmaSelect, this.value);
+    });
+
+    // Listener: forma de pagamento do primeiro entry
+    const primeiroEntry = document.querySelector('.curso-entry');
+    if (primeiroEntry) {
+        configurarListenersEntry(primeiroEntry);
+    }
+
+    // --- Gestão de Turmas ---
+    document.getElementById('btn-salvar-turma')?.addEventListener('click', salvarTurma);
+
     // Campo "Valor" no modal de pagamento
     document.getElementById('pag-valor')?.addEventListener('input', function () {
         aplicarMascaraMoeda(this);
     });
 }
 
+function configurarListenersEntry(entry) {
+    // Listener: forma-pagamento-select alterna os campos visíveis
+    const fpSel = entry.querySelector('.forma-pagamento-select');
+    if (fpSel) {
+        fpSel.addEventListener('change', function () {
+            const isParcelado = this.value === 'parcelado';
+            const ataContainer = entry.querySelector('.metodo-avista-container');
+            const parContainer = entry.querySelector('.metodo-parcelado-container');
+            const numContainer = entry.querySelector('.numero-parcelas-container');
+            if (ataContainer) ataContainer.style.display = isParcelado ? 'none' : '';
+            if (parContainer) parContainer.style.display = isParcelado ? '' : 'none';
+            if (numContainer) numContainer.style.display = isParcelado ? '' : 'none';
+        });
+    }
+}
+
 function adicionarLinhaCurso() {
     const container = document.getElementById('cursos-container');
     const template = container.querySelector('.curso-entry').cloneNode(true);
 
-    // Reseta valores e adiciona máscara
-    template.querySelector('.curso-select').value = '';
-    template.querySelector('.turma-input').value = '';
+    // Reseta valores
+    const cursoSel = template.querySelector('.curso-select');
+    if (cursoSel) cursoSel.value = '';
+
+    // Reseta e re-popula o turma-select
+    const turmaSel = template.querySelector('.turma-select');
+    popularTurmaSelect(turmaSel, null);
+
+    // Reseta campos de pagamento
+    const fpSel2 = template.querySelector('.forma-pagamento-select');
+    if (fpSel2) fpSel2.value = 'a-vista';
+    template.querySelector('.metodo-avista-container')?.style.setProperty('display', '');
+    template.querySelector('.metodo-parcelado-container')?.style.setProperty('display', 'none');
+    template.querySelector('.numero-parcelas-container')?.style.setProperty('display', 'none');
+
+    // Reseta valor e máscara
     const valorInput = template.querySelector('.valor-input');
     valorInput.value = '';
     valorInput.addEventListener('input', function () {
         aplicarMascaraMoeda(this);
     });
 
-    // Adiciona botão de remover
+    // Reseta contrato
+    const contratoInput = template.querySelector('.contrato-input');
+    if (contratoInput) contratoInput.value = '';
+
+    // Listeners: curso → filtrar turmas
+    cursoSel?.addEventListener('change', function () {
+        popularTurmaSelect(turmaSel, this.value);
+    });
+
+    // Listeners: forma de pagamento
+    configurarListenersEntry(template);
+
+    // Botão de remover
     const btnRemover = document.createElement('button');
     btnRemover.type = 'button';
-    btnRemover.textContent = '🗑️ Remover';
-    btnRemover.style.cssText = 'background: transparent; border: none; color: var(--txt-mid); cursor: pointer; font-size: 0.85em; font-weight: 600; padding-bottom: 12px; transition: var(--t-fast); height: 48px;';
-    btnRemover.onmouseover = () => { btnRemover.style.color = 'var(--vermelho)'; btnRemover.style.textDecoration = 'underline'; };
-    btnRemover.onmouseout = () => { btnRemover.style.color = 'var(--txt-mid)'; btnRemover.style.textDecoration = 'none'; };
+    btnRemover.textContent = '🗑️ Remover este curso';
+    btnRemover.style.cssText = 'margin-top: 8px; background: transparent; border: 1px dashed var(--borda); border-radius: var(--r-sm); color: var(--txt-mid); cursor: pointer; font-size: 0.82em; font-weight: 600; padding: 6px 14px; transition: var(--t-fast);';
+    btnRemover.onmouseover = () => { btnRemover.style.color = 'var(--vermelho)'; btnRemover.style.borderColor = 'var(--vermelho)'; };
+    btnRemover.onmouseout  = () => { btnRemover.style.color = 'var(--txt-mid)'; btnRemover.style.borderColor = 'var(--borda)'; };
     btnRemover.onclick = () => template.remove();
     template.appendChild(btnRemover);
 
@@ -2085,30 +2649,34 @@ window.removerVinculo = async function (id) {
 // ==================== CARREGAR TURMAS ====================
 async function carregarTurmasDisponiveis() {
     try {
-        // Busca as turmas que os alunos já estão matriculados
-        const { data, error } = await db.from('matriculas').select('turma');
+        // Usa a tabela turmas como fonte única de verdade
+        const { data, error } = await db
+            .from('turmas')
+            .select('id, nome, codigo_turma, cursos(nome)')
+            .order('nome');
+
         if (error) throw error;
 
-        // Filtra valores vazios/nulos e remove duplicatas
-        const turmasUnicas = [...new Set(data.map(d => d.turma).filter(Boolean))].sort();
+        const turmasDisponiveis = data || [];
 
-        const optionsHTML = '<option value="">Selecione a Turma</option>' +
-            turmasUnicas.map(t => `<option value="${t}">${t}</option>`).join('');
+        const toOption = t =>
+            `<option value="${t.id}">${t.nome} — ${t.cursos ? t.cursos.nome : ''} (${t.codigo_turma})</option>`;
 
         // Preenche o Select de Vínculos de Professor
         const selectVinculo = document.getElementById('vinculo-turma');
         if (selectVinculo) {
             selectVinculo.innerHTML = '<option value="">Todas as Turmas (Geral)</option>' +
-                turmasUnicas.map(t => `<option value="${t}">${t}</option>`).join('');
+                turmasDisponiveis.map(toOption).join('');
         }
 
         // Preenche o Select de Disparo de Avisos
         const selectAviso = document.getElementById('aviso-turma');
         if (selectAviso) {
-            selectAviso.innerHTML = optionsHTML;
+            selectAviso.innerHTML = '<option value="">Selecione a Turma</option>' +
+                turmasDisponiveis.map(toOption).join('');
         }
     } catch (e) {
-        console.error("Erro ao carregar turmas:", e);
+        console.error('Erro ao carregar turmas disponíveis:', e);
     }
 }
 
