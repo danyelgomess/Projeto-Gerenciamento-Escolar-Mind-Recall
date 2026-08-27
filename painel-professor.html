@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mind Recall — Portal do Professor</title>
+    <meta name="description"
+        content="Portal do professor Mind Recall. Acesse suas turmas, diário de classe e envie avisos aos alunos.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800&family=Poppins:wght@600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Layout Professor: Sidebar + Conteúdo -->
+    <div class="professor-layout">
+
+        <!-- Sidebar -->
+        <aside class="prof-sidebar">
+            <div class="prof-sidebar-logo">
+                <div class="prof-logo-icon">M</div>
+                <span class="prof-logo-text">Mind Recall</span>
+                <span class="prof-logo-badge">Professor</span>
+            </div>
+
+            <nav class="prof-sidebar-nav">
+                <button type="button" class="prof-nav-item active" data-tab="prof-inicio">
+                    <span class="prof-nav-icon">🏠</span>
+                    <span>Início</span>
+                </button>
+                <button type="button" class="prof-nav-item" data-tab="prof-turmas">
+                    <span class="prof-nav-icon">📚</span>
+                    <span>Minhas Turmas</span>
+                </button>
+                <button type="button" class="prof-nav-item" data-tab="prof-diario">
+                    <span class="prof-nav-icon">📝</span>
+                    <span>Diário de Classe</span>
+                </button>
+                <button type="button" class="prof-nav-item" data-tab="prof-aprovacao">
+                    <span class="prof-nav-icon">✅</span>
+                    <span>Aprovar Certificados</span>
+                </button>
+                <button type="button" class="prof-nav-item" data-tab="prof-avisos">
+                    <span class="prof-nav-icon">📢</span>
+                    <span>Disparar Avisos</span>
+                </button>
+            </nav>
+
+            <div class="prof-sidebar-footer">
+                <div class="prof-user-info">
+                    <div class="prof-user-avatar" id="prof-avatar">P</div>
+                    <div class="prof-user-details">
+                        <span class="prof-user-name" id="prof-user-name">Professor</span>
+                        <span class="prof-user-email" id="prof-user-email">email@escola.com</span>
+                    </div>
+                </div>
+                <button type="button" id="prof-btn-sair" class="prof-btn-sair">
+                    Sair
+                </button>
+            </div>
+        </aside>
+
+        <!-- Conteúdo Principal -->
+        <main class="prof-main">
+
+            <!-- Aba Início / Dashboard Pessoal -->
+            <div id="prof-inicio" class="prof-tabcontent active">
+                <div class="prof-page-header">
+                    <h1>Bem-vindo, <span id="prof-welcome-name">Professor</span>!</h1>
+                    <p class="prof-page-subtitle">Visão geral das suas turmas e alunos</p>
+                </div>
+
+                <div class="prof-dashboard-cards">
+                    <div class="prof-stat-card prof-stat-turmas">
+                        <div class="prof-stat-icon">📚</div>
+                        <div class="prof-stat-info">
+                            <span class="prof-stat-value" id="prof-total-turmas">0</span>
+                            <span class="prof-stat-label">Minhas Turmas</span>
+                        </div>
+                    </div>
+                    <div class="prof-stat-card prof-stat-alunos">
+                        <div class="prof-stat-icon">👨‍🎓</div>
+                        <div class="prof-stat-info">
+                            <span class="prof-stat-value" id="prof-total-alunos">0</span>
+                            <span class="prof-stat-label">Total de Alunos</span>
+                        </div>
+                    </div>
+                    <div class="prof-stat-card prof-stat-cursos">
+                        <div class="prof-stat-icon">🎓</div>
+                        <div class="prof-stat-info">
+                            <span class="prof-stat-value" id="prof-total-cursos">0</span>
+                            <span class="prof-stat-label">Cursos Vinculados</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista rápida de turmas recentes -->
+                <div class="prof-section-card">
+                    <h3>📋 Suas Turmas</h3>
+                    <div id="prof-lista-turmas-rapida" class="prof-turmas-grid">
+                        <p style="color: var(--txt-navy-sub);">Carregando suas turmas...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba Minhas Turmas -->
+            <div id="prof-turmas" class="prof-tabcontent">
+                <div class="prof-page-header">
+                    <h1>📚 Minhas Turmas</h1>
+                    <p class="prof-page-subtitle">Turmas e alunos sob sua responsabilidade</p>
+                </div>
+
+                <div class="prof-section-card">
+                    <div class="input-group" style="max-width: 400px; margin-bottom: 20px;">
+                        <label for="prof-turma-select" style="color: #1e293b; font-weight: 500;">Selecionar
+                            Turma:</label>
+                        <select id="prof-turma-select" style="height: 48px;">
+                            <option value="">Selecione uma turma...</option>
+                        </select>
+                    </div>
+
+                    <div id="prof-turma-alunos-container" style="display: none;">
+                        <h3 id="prof-turma-titulo" style="margin-bottom: 16px; color: var(--txt-dark);">Alunos da Turma
+                        </h3>
+                        <div class="table-section">
+                            <table class="prof-tabela">
+                                <thead>
+                                    <tr>
+                                        <th>Nome do Aluno</th>
+                                        <th>CPF</th>
+                                        <th>Curso</th>
+                                        <th>RA</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="prof-lista-alunos-turma"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba Diário de Classe -->
+            <div id="prof-diario" class="prof-tabcontent">
+                <div class="prof-page-header">
+                    <h1>📝 Diário de Classe</h1>
+                    <p class="prof-page-subtitle">Lançamento de notas para seus alunos</p>
+                </div>
+
+                <div class="prof-section-card">
+                    <div class="form-grid" style="margin-bottom: 20px;">
+                        <div class="input-group" style="max-width: 400px;">
+                            <label for="prof-diario-turma" style="color: var(--txt-dark);">Filtrar por Turma:</label>
+                            <select id="prof-diario-turma" style="height: 48px;">
+                                <option value="">Todas as turmas</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="max-width: 400px;">
+                            <label for="prof-diario-busca" style="color: var(--txt-dark);">Buscar Aluno:</label>
+                            <input type="text" id="prof-diario-busca" placeholder="Nome ou RA...">
+                        </div>
+                    </div>
+
+                    <div class="table-section">
+                        <table class="prof-tabela">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Curso</th>
+                                    <th>Turma</th>
+                                    <th>N1</th>
+                                    <th>N2</th>
+                                    <th>Média</th>
+                                    <th>Situação</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prof-lista-diario"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba Aprovar Certificados -->
+            <div id="prof-aprovacao" class="prof-tabcontent">
+                <div class="prof-page-header">
+                    <h1>✅ Aprovação de Certificados</h1>
+                    <p class="prof-page-subtitle">Valide a conclusão do curso para liberar a emissão do certificado pela Secretaria.</p>
+                </div>
+
+                <!-- Banner informativo -->
+                <div style="background: linear-gradient(135deg, #e0f2fe, #bae6fd); border-left: 4px solid #0284c7; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: flex-start; gap: 12px;">
+                    <span style="font-size: 1.4rem;">ℹ️</span>
+                    <div>
+                        <p style="margin: 0; font-weight: 600; color: #0c4a6e;">Como funciona a aprovação?</p>
+                        <p style="margin: 4px 0 0 0; color: #075985; font-size: 0.9rem;">Ao clicar em <strong>Aprovar</strong>, o status de conclusão do aluno é atualizado para <em>"Aprovado"</em> no sistema. A Secretaria será automaticamente habilitada a emitir e enviar o certificado para esse aluno. Alunos reprovados ficam bloqueados da emissão.</p>
+                    </div>
+                </div>
+
+                <div class="prof-section-card">
+                    <div class="prof-controls" style="margin-bottom: 20px;">
+                        <div class="prof-control-group">
+                            <label for="prof-aprovacao-turma" style="color: var(--txt-dark); font-weight: 500;">Selecionar Curso:</label>
+                            <select id="prof-aprovacao-turma" class="prof-select" style="height: 48px; min-width: 280px;">
+                                <option value="">Carregando cursos...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-section">
+                        <table class="prof-table">
+                            <thead>
+                                <tr>
+                                    <th>RA</th>
+                                    <th>Aluno</th>
+                                    <th>Status de Conclusão</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="lista-alunos-aprovacao">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; color: var(--txt-mid); padding: 32px;">
+                                        Selecione um curso para ver os alunos.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+
+            <div id="prof-avisos" class="prof-tabcontent">
+                <div class="prof-page-header">
+                    <h1>📢 Disparar Avisos</h1>
+                    <p class="prof-page-subtitle">Envie comunicados para seus alunos ou turmas</p>
+                </div>
+
+                <div class="prof-section-card">
+                    <form id="prof-form-aviso" class="form-grid">
+                        <div class="input-group" style="grid-column: 1 / -1;">
+                            <label style="color: var(--txt-dark);">Tipo de Destinatário:</label>
+                            <div style="display: flex; gap: 20px; align-items: center; margin-top: 8px;">
+                                <label
+                                    style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; color: var(--txt-dark);">
+                                    <input type="radio" name="prof-tipo-aviso" value="aluno" checked> Aluno Específico
+                                    (RA)
+                                </label>
+                                <label
+                                    style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; color: var(--txt-dark);">
+                                    <input type="radio" name="prof-tipo-aviso" value="turma"> Turma Inteira
+                                </label>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label for="prof-aviso-titulo" style="color: var(--txt-dark);">Título do Aviso:</label>
+                            <input type="text" id="prof-aviso-titulo" placeholder="Ex: Mudança de Sala" required>
+                        </div>
+
+                        <div class="input-group" id="prof-container-aviso-destino">
+                            <label for="prof-aviso-ra" id="prof-label-aviso-destino" style="color: var(--txt-dark);">RA
+                                do Aluno:</label>
+                            <input type="text" id="prof-aviso-ra" placeholder="RA do Aluno" required>
+                            <select id="prof-aviso-turma" style="display: none; height: 48px;">
+                                <option value="">Selecione a turma...</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group" style="grid-column: 1 / -1;">
+                            <label for="prof-aviso-mensagem" style="color: var(--txt-dark);">Mensagem:</label>
+                            <textarea id="prof-aviso-mensagem" placeholder="Digite o aviso aqui..."
+                                style="min-height: 120px; padding: 12px; border-radius: var(--r-md); border: 1px solid var(--panel-border); font-family: inherit; resize: vertical;"
+                                required></textarea>
+                        </div>
+                        <div class="form-actions" style="justify-content: flex-start; grid-column: 1 / -1;">
+                            <button type="button" id="prof-btn-enviar-aviso"
+                                style="background: var(--navy); color: var(--gold); border-radius: var(--r-md); padding: 12px 28px; font-weight: 700; border: none; cursor: pointer; font-size: 1em; transition: 0.2s;">
+                                📢 Disparar Aviso
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modal Lançar Notas (Professor) -->
+    <div id="prof-modal-notas" class="modal-overlay">
+        <div class="modal-container" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Lançamento de Notas</h3>
+                <button class="modal-close" onclick="fecharModalNotasProf()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="prof-notas-subtitle"
+                    style="font-weight: 500; margin-bottom: 16px; color: var(--txt-light); font-size: 0.95rem;"></p>
+                <input type="hidden" id="prof-matricula-id-notas">
+                <div class="input-group" style="margin-bottom: 15px;">
+                    <label>Nota 1 (N1):</label>
+                    <input type="number" id="prof-nota1-input" step="0.1" min="0" max="10">
+                </div>
+                <div class="input-group">
+                    <label>Nota 2 (N2):</label>
+                    <input type="number" id="prof-nota2-input" step="0.1" min="0" max="10">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-cancel" onclick="fecharModalNotasProf()">Cancelar</button>
+                <button class="modal-btn modal-btn-confirm" id="prof-btn-salvar-notas">Salvar Boletim</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Alerta -->
+    <div id="modal-alerta" class="modal-overlay">
+        <div class="modal-container" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3 id="alerta-titulo">Aviso</h3>
+                <button class="modal-close" onclick="fecharModalAlerta()">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <p id="alerta-mensagem" style="font-size: 1.1em; font-weight: 500;"></p>
+            </div>
+            <div class="modal-footer" style="justify-content: center;">
+                <button class="modal-btn modal-btn-confirm" onclick="fecharModalAlerta()">OK, Entendi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CDN do Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Script isolado do professor -->
+    <script src="script-professor.js"></script>
+</body>
+
+</html>
