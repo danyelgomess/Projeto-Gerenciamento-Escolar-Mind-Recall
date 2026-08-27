@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://via.placeholder.com/150x150.png?text=Logo+Mind+Recall" alt="Mind Recall Logo" width="120" />
+  <img src="logo.jpg" alt="Mind Recall Logo" width="120" />
   
   <h1>🧠 Mind Recall</h1>
   <p><strong>Plataforma de Gestão Educacional Inteligente (ERP)</strong></p>
