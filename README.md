@@ -37,8 +37,8 @@ O **Mind Recall** é uma plataforma educacional (ERP) completa, desenvolvida par
 *Abaixo você pode ver partes importantes do sistema em pleno funcionamento:*
 
 <div align="center">
-  <img src="Secretaria Painel.jpg" alt="Painel da Secretaria" width="48%">
-  <img src="Professor Painel.jpg" alt="Painel do Professor" width="48%">
+  <img src="Secretaria%20Painel.png" alt="Painel da Secretaria" width="48%">
+  <img src="Professor%20Painel.png" alt="Painel do Professor" width="48%">
 </div>
 
 ---
