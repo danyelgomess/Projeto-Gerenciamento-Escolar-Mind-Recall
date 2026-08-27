@@ -94,15 +94,11 @@ python -m http.server 3000
 
 ---
 
-## 👨‍💻 Contato
+## 👨‍💻 Desenvolvedor e Suporte
 
-Desenvolvido com dedicação por **Danyel Moreira**. Entre em contato para parcerias, feedbacks ou oportunidades:
+Sistema arquitetado e desenvolvido por **Danyel Moreira**.
 
-<div align="center">
-  <a href="https://linkedin.com/in/seu-linkedin" target="_blank">
-    <img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn Danyel" />
-  </a>
-  <a href="mailto:seu.email.profissional@gmail.com">
-    <img src="https://img.shields.io/badge/E--mail-EA4335?style=for-the-badge&logo=gmail&logoColor=white" alt="Email Danyel" />
-  </a>
-</div>
+Para solicitações de manutenção, suporte técnico ou orçamento para desenvolvimento de novos módulos e integrações, entre em contato através dos canais abaixo:
+
+- ✉️ **E-mail:** [danyelmoreira99@gmail.com](mailto:danyelmoreira99@gmail.com)
+- 💼 **LinkedIn:** [Danyel Moreira](https://www.linkedin.com/in/danyelmoreira/)
