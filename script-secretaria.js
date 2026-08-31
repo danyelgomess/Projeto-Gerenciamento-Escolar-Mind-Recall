@@ -22,6 +22,7 @@ let cursoEditandoId = null; // UUID do curso no modal de edição
 let alunoNotasId = null;  // UUID do aluno no modal de notas
 let confirmCallback = null;
 let pagamentosCache = [];   // cache local para filtros do módulo financeiro
+let alunoEncontradoPorCpf = null; // objeto do aluno encontrado via busca por CPF (preenchimento automático)
 
 // ==================== MÁSCARA DE MOEDA ====================
 /**
@@ -198,9 +199,12 @@ function fecharModalAlerta() {
     document.getElementById('modal-alerta').classList.remove('active');
 }
 
-function mostrarConfirmacao(mensagem, callback, titulo = 'Confirmar Ação') {
+function mostrarConfirmacao(mensagem, callback, titulo = 'Confirmar Ação', textoBotao = 'Sim, Excluir') {
     document.getElementById('confirmacao-titulo').textContent = titulo;
     document.getElementById('confirmacao-mensagem').textContent = mensagem;
+    // Atualiza o label do botão de confirmação conforme o contexto
+    const btnConfirmar = document.getElementById('btn-confirmar-action');
+    if (btnConfirmar) btnConfirmar.textContent = textoBotao;
     confirmCallback = callback;
     document.getElementById('modal-confirmacao').classList.add('active');
 }
@@ -463,13 +467,12 @@ async function carregarCursos() {
             });
         }
 
-        // Atualiza todos os <select> de curso na página
+        // Atualiza todos os <select> de curso na página (exceto o filtro financeiro)
         const selectsIds = [
             'curso-crm',
             'curso-disciplina',
             'curso-diario',
-            'curso-aluno-editar',
-            'fin-filtro-curso'
+            'curso-aluno-editar'
         ].map(id => document.getElementById(id)).filter(Boolean);
 
         const selectsClass = Array.from(document.querySelectorAll('.curso-select'));
@@ -485,6 +488,19 @@ async function carregarCursos() {
                 select.add(option);
             });
         });
+
+        // Popula o filtro financeiro usando o NOME do curso como value
+        // para facilitar a comparação com p.cursos?.nome no filtro
+        const selectFinFiltro = document.getElementById('fin-filtro-curso');
+        if (selectFinFiltro) {
+            while (selectFinFiltro.options.length > 1) selectFinFiltro.remove(1);
+            listaCursos.forEach(curso => {
+                const option = document.createElement('option');
+                option.value = curso.nome;   // usa NOME como value
+                option.text = curso.nome;
+                selectFinFiltro.add(option);
+            });
+        }
     } catch (e) {
         console.error('Erro ao carregar cursos:', e);
     }
@@ -677,6 +693,168 @@ function formatarRA(ra) {
 }
 
 // ==================== ALUNOS ====================
+
+/**
+ * Busca um aluno pelo CPF digitado e preenche automaticamente os campos do formulário.
+ * Disparado EXCLUSIVAMENTE no evento `blur` do campo #cpf-aluno — sem trava de caracteres.
+ * A busca compara: (1) a string exata digitada e, como fallback, (2) apenas os dígitos.
+ * Isso garante compatibilidade com CPFs salvos com ou sem máscara no banco.
+ * Salva o resultado em `alunoEncontradoPorCpf` para uso posterior em matricularAluno().
+ */
+async function buscarAlunoPorCpf() {
+    if (!db) return;
+
+    const cpfInput = document.getElementById('cpf-aluno');
+    const nomeInput = document.getElementById('nome-aluno');
+    const badge    = document.getElementById('badge-cpf-autofill');
+
+    if (!cpfInput) return;
+
+    const cpfDigitado = cpfInput.value.trim();
+
+    // Aborta silenciosamente se o campo estiver completamente vazio
+    if (!cpfDigitado) {
+        // Se havia um aluno carregado antes, limpa o estado
+        if (alunoEncontradoPorCpf) {
+            alunoEncontradoPorCpf = null;
+            if (nomeInput && nomeInput.dataset.autoFilled === 'true') {
+                nomeInput.value = '';
+                nomeInput.readOnly = false;
+                nomeInput.removeAttribute('data-auto-filled');
+                nomeInput.style.background = '';
+                nomeInput.style.borderColor = '';
+            }
+            if (badge) badge.style.display = 'none';
+        }
+        return;
+    }
+
+    // Indicador visual de busca
+    if (badge) {
+        badge.style.display = 'flex';
+        badge.className = 'badge-cpf-autofill badge-cpf-loading';
+        badge.innerHTML = '<span class="spinner-cpf"></span> Verificando CPF no sistema...';
+    }
+
+    try {
+        // ── Estratégia de busca dupla ────────────────────────────────────────
+        // NOTA: O banco salva o CPF exatamente como foi digitado no input (sem
+        // normalização). Por isso buscamos primeiro pela string exata e, se não
+        // achar, pelos dígitos puros — cobrindo ambos os formatos possíveis.
+        const cpfSoNumeros = cpfDigitado.replace(/\D/g, '');
+
+        // DEBUG — inspecione o Console do navegador para ver o que vai ao Supabase
+        console.log('[Auto-Fill CPF] Tentativa 1 — string exata:', JSON.stringify(cpfDigitado));
+
+        let { data: aluno, error } = await db
+            .from('alunos')
+            .select('id, nome, cpf, telefone')
+            .eq('cpf', cpfDigitado)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        console.log('[Auto-Fill CPF] Resultado tentativa 1:', aluno ? `encontrado (id: ${aluno.id}, cpf salvo: "${aluno.cpf}")` : 'não encontrado');
+
+        // Fallback: tenta pelos dígitos puros (evita re-consulta se já são iguais)
+        if (!aluno && cpfSoNumeros && cpfSoNumeros !== cpfDigitado) {
+            console.log('[Auto-Fill CPF] Tentativa 2 — só dígitos:', JSON.stringify(cpfSoNumeros));
+
+            const { data: alunoFallback, error: errFallback } = await db
+                .from('alunos')
+                .select('id, nome, cpf, telefone')
+                .eq('cpf', cpfSoNumeros)
+                .maybeSingle();
+            if (errFallback) throw errFallback;
+
+            console.log('[Auto-Fill CPF] Resultado tentativa 2:', alunoFallback ? `encontrado (id: ${alunoFallback.id}, cpf salvo: "${alunoFallback.cpf}")` : 'não encontrado');
+            aluno = alunoFallback;
+        }
+
+        if (aluno) {
+            // ─── Aluno encontrado: preenche campos e exibe badge de sucesso ───
+            alunoEncontradoPorCpf = aluno;
+
+            if (nomeInput) {
+                nomeInput.value = aluno.nome || '';
+                nomeInput.readOnly = true;
+                nomeInput.dataset.autoFilled = 'true';
+                // Destaque sutil para indicar preenchimento automático
+                nomeInput.style.background = 'rgba(16, 185, 129, 0.08)';
+                nomeInput.style.borderColor = 'rgba(16, 185, 129, 0.5)';
+                nomeInput.style.color = 'var(--txt-dark)';
+            }
+
+            if (badge) {
+                badge.className = 'badge-cpf-autofill badge-cpf-success';
+                badge.innerHTML = `
+                    <span style="font-size:1.1em;">✅</span>
+                    <span>
+                        <strong>Aluno já cadastrado.</strong>
+                        Dados preenchidos automaticamente.
+                        Prossiga apenas com os dados da nova matrícula.
+                    </span>
+                    <button type="button" onclick="limparAutoFillCpf()" title="Editar manualmente" style="
+                        background: transparent; border: 1px solid rgba(16,185,129,0.4); border-radius: 4px;
+                        color: #10b981; cursor: pointer; font-size: 0.75rem; padding: 2px 8px;
+                        font-weight: 600; white-space: nowrap;
+                    ">✎ Editar</button>`;
+                badge.style.display = 'flex';
+            }
+        } else {
+            // ─── Aluno NÃO encontrado: limpa estado anterior e libera campos ───
+            alunoEncontradoPorCpf = null;
+
+            if (nomeInput && nomeInput.dataset.autoFilled === 'true') {
+                nomeInput.value = '';
+                nomeInput.readOnly = false;
+                nomeInput.removeAttribute('data-auto-filled');
+                nomeInput.style.background = '';
+                nomeInput.style.borderColor = '';
+            }
+
+            if (badge) {
+                badge.className = 'badge-cpf-autofill badge-cpf-new';
+                badge.innerHTML = `
+                    <span style="font-size:1.1em;">🆕</span>
+                    <span>CPF não encontrado. <strong>Novo aluno</strong> será cadastrado ao efetivar.</span>`;
+                badge.style.display = 'flex';
+            }
+        }
+    } catch (e) {
+        console.error('Erro ao buscar aluno por CPF:', e);
+        alunoEncontradoPorCpf = null;
+        if (badge) {
+            badge.className = 'badge-cpf-autofill badge-cpf-error';
+            badge.innerHTML = `<span>⚠️ Erro ao verificar CPF: ${e.message}</span>`;
+            badge.style.display = 'flex';
+        }
+    }
+}
+
+/**
+ * Permite ao usuário descartar o auto-fill e editar o nome manualmente.
+ */
+function limparAutoFillCpf() {
+    alunoEncontradoPorCpf = null;
+
+    const nomeInput = document.getElementById('nome-aluno');
+    if (nomeInput) {
+        nomeInput.value = '';
+        nomeInput.readOnly = false;
+        nomeInput.removeAttribute('data-auto-filled');
+        nomeInput.style.background = '';
+        nomeInput.style.borderColor = '';
+        nomeInput.focus();
+    }
+
+    const badge = document.getElementById('badge-cpf-autofill');
+    if (badge) {
+        badge.className = 'badge-cpf-autofill badge-cpf-new';
+        badge.innerHTML = `<span style="font-size:1.1em;">✏️</span> <span>Preenchimento automático removido. Preencha os dados manualmente.</span>`;
+    }
+}
+
 async function matricularAluno() {
     const btn = document.getElementById('btn-matricular');
     const originalText = btn ? btn.innerHTML : '';
@@ -761,15 +939,33 @@ async function matricularAluno() {
         // valorTotal ainda usado para compatibilidade
         const dataMatricula = new Date().toISOString().split('T')[0];
 
-        // ── NOVA LÓGICA DE CPF ─────────────────────────────────────
-        // 1. Verifica se o CPF já existe no sistema
-        const { data: alunoExistente, error: errCpf } = await db
-            .from('alunos')
-            .select('id, nome, cpf, curso_id, curso_nome')
-            .eq('cpf', cpf)
-            .maybeSingle();
+        // ── LÓGICA DE CPF COM CACHE DO AUTO-FILL ──────────────────
+        // 1. Se o auto-fill já encontrou o aluno (buscarAlunoPorCpf foi disparado),
+        //    reutiliza o cache — sem fazer nova requisição ao Supabase.
+        //    Caso contrário (ex: usuário colou o CPF sem sair do campo), faz a consulta.
+        let alunoExistente;
 
-        if (errCpf) throw new Error(`Erro de conexão ao verificar CPF: ${errCpf.message}`);
+        if (alunoEncontradoPorCpf && alunoEncontradoPorCpf.cpf === cpf) {
+            // ── Cache de auto-fill disponível e consistente ────────────
+            console.info(`[Auto-Fill] Reaproveitando cache: aluno ID ${alunoEncontradoPorCpf.id} (${alunoEncontradoPorCpf.nome})`);
+            // Busca campos extras que a busca rápida pode não ter retornado (curso_id, curso_nome)
+            const { data: alunoCompleto, error: errCache } = await db
+                .from('alunos')
+                .select('id, nome, cpf, curso_id, curso_nome')
+                .eq('id', alunoEncontradoPorCpf.id)
+                .single();
+            if (errCache) throw new Error(`Erro ao confirmar dados do aluno: ${errCache.message}`);
+            alunoExistente = alunoCompleto;
+        } else {
+            // ── Sem cache: consulta padrão ao Supabase ─────────────────
+            const { data, error: errCpf } = await db
+                .from('alunos')
+                .select('id, nome, cpf, curso_id, curso_nome')
+                .eq('cpf', cpf)
+                .maybeSingle();
+            if (errCpf) throw new Error(`Erro de conexão ao verificar CPF: ${errCpf.message}`);
+            alunoExistente = data;
+        }
 
         let alunoId;
         let primeiroCursoLegado;
@@ -947,6 +1143,18 @@ async function matricularAluno() {
         }
 
         // ── LIMPEZA DA UI ──────────────────────────────────────────
+        // Limpa o estado do auto-fill por CPF
+        alunoEncontradoPorCpf = null;
+        const nomeInputReset = document.getElementById('nome-aluno');
+        if (nomeInputReset) {
+            nomeInputReset.readOnly = false;
+            nomeInputReset.removeAttribute('data-auto-filled');
+            nomeInputReset.style.background = '';
+            nomeInputReset.style.borderColor = '';
+        }
+        const badgeReset = document.getElementById('badge-cpf-autofill');
+        if (badgeReset) badgeReset.style.display = 'none';
+
         document.getElementById('form-secretaria').reset();
 
         const container = document.getElementById('cursos-container');
@@ -1190,10 +1398,10 @@ function excluirAluno(alunoId) {
 
 async function abrirModalAluno(alunoId) {
     try {
-        // Busca o aluno com todos os dados, incluindo documento_rg
+        // Busca o aluno com todos os dados, incluindo documento_rg e email_sintetico
         const { data: aluno, error } = await db
             .from('alunos')
-            .select('*, documento_rg, matriculas(*, cursos(nome))')
+            .select('*, documento_rg, email_sintetico, matriculas(*, cursos(nome))')
             .eq('id', alunoId)
             .single();
 
@@ -1241,7 +1449,27 @@ async function abrirModalAluno(alunoId) {
         // Contato
         setValue('ficha-telefone', aluno.telefone);
         setValue('ficha-telefone2', aluno.telefone_secundario);
-        setValue('ficha-email', aluno.email);
+
+        // E-mail: exibe o e-mail de contato pessoal quando preenchido.
+        // Se estiver vazio, exibe o e-mail sintético (login do portal) como referência,
+        // com indicação visual de que é o e-mail de acesso, não o pessoal.
+        const emailContato = aluno.email && String(aluno.email).trim() !== '' ? aluno.email : null;
+        const emailEl = document.getElementById('ficha-email');
+        if (emailEl) {
+            if (emailContato) {
+                emailEl.textContent = emailContato;
+                emailEl.style.color = 'var(--txt-dark)';
+            } else if (aluno.email_sintetico) {
+                emailEl.innerHTML = `
+                    <span style="color: var(--txt-light); font-style: italic;">${aluno.email_sintetico}</span>
+                    <span style="display:inline-block; margin-left:6px; font-size:0.72rem; background:rgba(99,102,241,0.1);
+                          color:#6366f1; border:1px solid rgba(99,102,241,0.3); border-radius:4px;
+                          padding:1px 6px; font-weight:600; white-space:nowrap;">e-mail de acesso</span>`;
+            } else {
+                emailEl.textContent = 'Pendente';
+                emailEl.style.color = 'var(--txt-light)';
+            }
+        }
 
         // Endereço
         setValue('ficha-cep', aluno.cep);
@@ -1272,11 +1500,17 @@ async function abrirModalAluno(alunoId) {
             }
         }
 
-        // Banner de Alerta Onboarding
+        // ── Banner de Alerta Onboarding ───────────────────────────────
+        // Considera onboarding completo quando o aluno preencheu ao menos
+        // o telefone principal E o CEP (dados essenciais de contato/endereço).
+        // O e-mail de contato pessoal é opcional — não bloqueia a conclusão.
+        const temTelefone = aluno.telefone && String(aluno.telefone).trim() !== '';
+        const temCep      = aluno.cep      && String(aluno.cep).trim()      !== '';
+        const onboardingCompleto = temTelefone && temCep;
+
         const alerta = document.getElementById('alerta-onboarding');
-        const estaPendente = !aluno.telefone || !aluno.cep || !aluno.email;
         if (alerta) {
-            alerta.style.display = estaPendente ? 'flex' : 'none';
+            alerta.style.display = onboardingCompleto ? 'none' : 'flex';
         }
 
         document.getElementById('modal-aluno').classList.add('active');
@@ -1286,6 +1520,7 @@ async function abrirModalAluno(alunoId) {
         mostrarAlerta(`Erro ao carregar ficha do aluno: ${e.message}`);
     }
 }
+
 
 function fecharModalAluno() {
     document.getElementById('modal-aluno').classList.remove('active');
@@ -1475,6 +1710,14 @@ async function abrirModalNotas(matriculaId, nomeAluno, nomeCurso) {
 
     document.getElementById('nota1-input').value = matricula && matricula.nota1 !== null ? matricula.nota1 : '';
     document.getElementById('nota2-input').value = matricula && matricula.nota2 !== null ? matricula.nota2 : '';
+
+    // Exibe o botão "Limpar Notas" APENAS para usuários com perfil de Secretaria
+    const btnLimpar = document.getElementById('btn-limpar-notas');
+    if (btnLimpar) {
+        const isSecretaria = usuarioLogado && usuarioLogado.tipo === 'secretaria';
+        btnLimpar.style.display = isSecretaria ? 'inline-flex' : 'none';
+    }
+
     document.getElementById('modal-notas').classList.add('active');
 }
 
@@ -1486,17 +1729,26 @@ function fecharModalNotas() {
 async function salvarNotasModal() {
     if (alunoNotasId === null) return; // Aqui alunoNotasId armazena o ID da Matrícula
 
-    const nota1Str = document.getElementById('nota1-input').value;
-    const nota2Str = document.getElementById('nota2-input').value;
+    const nota1Str = document.getElementById('nota1-input').value.trim();
+    const nota2Str = document.getElementById('nota2-input').value.trim();
 
-    if (nota1Str === '' || nota2Str === '') {
-        mostrarAlerta('Preencha os dois campos de notas!');
+    // Campos vazios são convertidos para null (não para 0)
+    const n1 = nota1Str !== '' ? parseFloat(nota1Str) : null;
+    const n2 = nota2Str !== '' ? parseFloat(nota2Str) : null;
+
+    // Validação de intervalo somente quando os campos não são nulos
+    if (n1 !== null && (isNaN(n1) || n1 < 0 || n1 > 10)) {
+        mostrarAlerta('N1 inválido. Insira um valor entre 0 e 10, ou deixe em branco para limpar.');
+        return;
+    }
+    if (n2 !== null && (isNaN(n2) || n2 < 0 || n2 > 10)) {
+        mostrarAlerta('N2 inválido. Insira um valor entre 0 e 10, ou deixe em branco para limpar.');
         return;
     }
 
-    const n1 = parseFloat(nota1Str);
-    const n2 = parseFloat(nota2Str);
-
+    // Envia APENAS nota1 e nota2.
+    // A coluna `media` é GENERATED ALWAYS AS no PostgreSQL — o banco a calcula
+    // automaticamente. Enviá-la causaria: "column media can only be updated to DEFAULT"
     const { error } = await db
         .from('matriculas')
         .update({ nota1: n1, nota2: n2 })
@@ -1509,8 +1761,53 @@ async function salvarNotasModal() {
 
     fecharModalNotas();
     await carregarAlunosDiario();
-    mostrarAlerta('As notas do aluno foram salvas com sucesso!', 'Sucesso');
+    mostrarAlerta(
+        n1 === null && n2 === null
+            ? 'Notas removidas. Situação do aluno voltou para Pendente.'
+            : 'As notas do aluno foram salvas com sucesso!',
+        'Sucesso'
+    );
 }
+
+/**
+ * Limpa (reseta) as notas de uma matrícula específica.
+ * Exclusivo para Secretaria. Envia nota1: null e nota2: null.
+ * NUNCA envia o campo `media` — é GENERATED ALWAYS no PostgreSQL.
+ */
+async function limparNotasModal() {
+    if (alunoNotasId === null) return;
+
+    // Guarda seguro: apenas secretaria pode executar esta ação
+    if (!usuarioLogado || usuarioLogado.tipo !== 'secretaria') {
+        mostrarAlerta('Acesso negado. Apenas a Secretaria pode limpar notas.');
+        return;
+    }
+
+    // Usa o modal de confirmação customizado do sistema (sem window.confirm nativo)
+    mostrarConfirmacao(
+        'N1 e N2 serão apagadas e a média voltará para "pendente". Esta ação não pode ser desfeita.',
+        async () => {
+            // Envia APENAS nota1 e nota2 como null.
+            // NÃO enviar `media` — é coluna GENERATED ALWAYS.
+            const { error } = await db
+                .from('matriculas')
+                .update({ nota1: null, nota2: null })
+                .eq('id', alunoNotasId);
+
+            if (error) {
+                mostrarAlerta(`Erro ao limpar notas: ${error.message}`);
+                return;
+            }
+
+            fecharModalNotas();
+            await carregarAlunosDiario();
+            mostrarAlerta('Notas removidas com sucesso. Situação voltou para Pendente.', 'Sucesso');
+        },
+        'Limpar Notas do Aluno',
+        '🗑️ Sim, Limpar'
+    );
+}
+
 
 // ==================== DASHBOARD ====================
 async function atualizarDashboard() {
@@ -1763,14 +2060,15 @@ function filtrarPagamentos() {
 
     const filtrados = pagamentosCache.filter(p => {
         const nomeAluno = (p.alunos?.nome || '').toLowerCase();
-        const raAluno = p.alunos?.ra ? String(p.alunos.ra) : '';
-        const cursoId = p.curso_id || '';
+        const raAluno = p._ra ? String(p._ra) : (p.alunos?.ra ? String(p.alunos.ra) : '');
+        // Curso: compara o nome do curso (normalizado) com o valor do filtro
+        const nomeCurso = p.cursos?.nome || '';
         const forma = p.forma_pagamento || '';
         const status = p.status || '';
 
         return (
             (!busca || nomeAluno.includes(busca) || raAluno.includes(busca)) &&
-            (!cursofiltro || cursoId === cursofiltro) &&
+            (!cursofiltro || nomeCurso === cursofiltro) &&
             (!formafiltro || forma === formafiltro) &&
             (!statusfiltro || status === statusfiltro)
         );
@@ -2187,6 +2485,15 @@ function configurarEventos() {
 
     const btnMatricular = document.getElementById('btn-matricular');
     if (btnMatricular) btnMatricular.addEventListener('click', matricularAluno);
+
+    // --- Auto-fill por CPF ---
+    // Dispara SEMPRE no blur (ao sair do campo), sem restricao de tamanho.
+    // O listener de `input` foi removido pois causava disparos prematuros e
+    // a busca dupla dentro de buscarAlunoPorCpf() ja cobre todos os formatos.
+    const cpfInput = document.getElementById('cpf-aluno');
+    if (cpfInput) {
+        cpfInput.addEventListener('blur', buscarAlunoPorCpf);
+    }
 
     const btnSalvarAviso = document.getElementById('btn-salvar-aviso');
     if (btnSalvarAviso) btnSalvarAviso.addEventListener('click', salvarAviso);
@@ -2856,6 +3163,35 @@ window.enviarCertificado = async function (matriculaId) {
 // ==========================================
 // 2. MÓDULO DE CONTRATOS
 // ==========================================
+
+/**
+ * Formata um timestamp ISO (TIMESTAMPTZ do Supabase) para o padrão brasileiro.
+ * Usa Intl.DateTimeFormat nativo — sem dependência externa.
+ * @param {string|null} isoString  - Ex: "2026-08-31T18:30:00+00:00"
+ * @returns {string}               - Ex: "31/08/2026 às 15:30" (fuso de Brasília)
+ */
+function formatarDataAssinatura(isoString) {
+    if (!isoString) return null;
+    try {
+        const dt = new Date(isoString);
+        if (isNaN(dt.getTime())) return null;
+
+        const formatador = new Intl.DateTimeFormat('pt-BR', {
+            day:      '2-digit',
+            month:    '2-digit',
+            year:     'numeric',
+            hour:     '2-digit',
+            minute:   '2-digit',
+            timeZone: 'America/Sao_Paulo'
+        });
+
+        // "31/08/2026, 15:30" → adaptamos para "31/08/2026 às 15:30"
+        return formatador.format(dt).replace(', ', ' às ');
+    } catch (_) {
+        return null;
+    }
+}
+
 async function carregarContratos() {
     const tbody = document.getElementById('lista-contratos');
     if (!tbody) return;
@@ -2869,6 +3205,8 @@ async function carregarContratos() {
             .select(`
                 id,
                 contrato_url,
+                contrato_assinado,
+                data_assinatura_contrato,
                 cursos ( nome ),
                 alunos ( id, nome, ra, cpf )
             `);
@@ -2886,32 +3224,54 @@ async function carregarContratos() {
             const aluno = Array.isArray(m.alunos) ? m.alunos[0] : m.alunos;
             const curso = Array.isArray(m.cursos) ? m.cursos[0] : m.cursos;
             const alunoNome = aluno?.nome ?? 'Aluno não informado';
-            const alunoRa = aluno?.ra ?? '-';
+            const alunoRaRaw = aluno?.ra ?? null;
+            // Aplica a máscara de RA (ex: 250.2500.00001)
+            const alunoRaExibido = alunoRaRaw ? formatarRA(alunoRaRaw) : '-';
             const alunoCpf = aluno?.cpf ?? '';
             const cursoNome = curso?.nome ?? '-';
 
-            const temContrato = !!m.contrato_url;
-            const badgeClasse = temContrato ? 'badge-pago' : 'badge-pendente';
-            const statusTexto = temContrato ? '✅ Assinado' : 'Pendente';
+            // Lê o booleano contrato_assinado; só exibe "ASSINADO" se for true
+            const assinado = m.contrato_assinado === true;
 
-            const acaoContrato = temContrato
+            // ── Monta a célula de status (badge + carimbo de tempo) ──
+            let statusCelulaHtml;
+            if (assinado) {
+                const dataFormatada = formatarDataAssinatura(m.data_assinatura_contrato);
+                statusCelulaHtml = `
+                    <div class="contrato-status-assinado">
+                        <span class="badge badge-pago contrato-badge-assinado">✅ ASSINADO</span>
+                        ${dataFormatada
+                            ? `<span class="contrato-timestamp">
+                                   <span class="contrato-timestamp-icon">📅</span>
+                                   Assinado digitalmente em: <strong>${dataFormatada}</strong>
+                               </span>`
+                            : `<span class="contrato-timestamp contrato-timestamp-sem-data">
+                                   ⚠️ Data não registrada
+                               </span>`
+                        }
+                    </div>`;
+            } else {
+                statusCelulaHtml = `<span class="badge badge-pendente">⏳ Aguardando Assinatura</span>`;
+            }
+
+            const acaoContrato = m.contrato_url
                 ? `<button type="button" class="btn-action" onclick="abrirContrato('${m.contrato_url}')">Ver Contrato</button>`
-                : `<span style="color: #64748b; font-size: 0.9em;">Pendente</span>`;
+                : `<span style="color: #64748b; font-size: 0.9em;">Sem arquivo</span>`;
 
             const rowHtml = `
                 <td>
                     <strong>${alunoNome}</strong><br>
-                    <span style="font-size: 0.8em; color: gray;">RA: ${alunoRa}</span>
+                    <span style="font-family:monospace;font-size:0.8em;color:gray;">RA: ${alunoRaExibido}</span>
                 </td>
                 <td>${cursoNome}</td>
-                <td><span class="badge ${badgeClasse}">${statusTexto}</span></td>
+                <td>${statusCelulaHtml}</td>
                 <td>${acaoContrato}</td>
             `;
 
             // Guarda no cache para filtro em tempo real
             contratosCache.push({
                 _nomeAluno: alunoNome,
-                _raAluno: alunoRa,
+                _raAluno: alunoRaRaw ?? '-',
                 _cpfAluno: alunoCpf,
                 _nomeCurso: cursoNome,
                 _htmlRow: rowHtml

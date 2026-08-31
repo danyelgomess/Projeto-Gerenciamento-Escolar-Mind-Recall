@@ -531,3 +531,76 @@ CREATE INDEX IF NOT EXISTS idx_alunos_cpf ON public.alunos (cpf);
 -- ============================================================
 -- SELECT id, nome, cpf, email_sintetico FROM public.alunos LIMIT 5;
 -- ============================================================
+
+-- ============================================================
+-- EVOLUÇÃO v5 — Portal do Aluno: coluna contrato_assinado
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- Data: 2026-08
+-- ============================================================
+
+-- Adiciona flag booleana de assinatura de contrato na tabela matriculas.
+-- O valor padrão é FALSE. O Portal do Aluno será responsável por
+-- atualizar para TRUE quando o aluno assinar digitalmente o contrato.
+ALTER TABLE public.matriculas
+    ADD COLUMN IF NOT EXISTS contrato_assinado BOOLEAN NOT NULL DEFAULT FALSE;
+
+COMMENT ON COLUMN public.matriculas.contrato_assinado IS
+    'Indica se o aluno assinou o contrato desta matrícula. '
+    'Atualizado pelo Portal do Aluno após assinatura digital. '
+    'Default FALSE.';
+
+-- ============================================================
+-- VERIFICAÇÃO v5
+-- ============================================================
+-- SELECT id, ra, contrato_assinado FROM public.matriculas LIMIT 10;
+-- ============================================================
+
+-- ============================================================
+-- EVOLUÇÃO v6 — Auditoria de Assinatura: data_assinatura_contrato
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- Data: 2026-08
+-- ============================================================
+
+-- 1. Adiciona o timestamp de assinatura digital na tabela matriculas.
+--    Preenchido automaticamente pelo trigger abaixo quando contrato_assinado
+--    mudar de FALSE → TRUE. Pode também ser definido manualmente pela Secretaria.
+ALTER TABLE public.matriculas
+    ADD COLUMN IF NOT EXISTS data_assinatura_contrato TIMESTAMPTZ;
+
+COMMENT ON COLUMN public.matriculas.data_assinatura_contrato IS
+    'Timestamp (com timezone) de quando o contrato foi assinado digitalmente. '
+    'Preenchido automaticamente pelo trigger trg_set_data_assinatura quando '
+    'contrato_assinado muda de FALSE para TRUE. Auditoria imutável.';
+
+-- 2. Trigger: preenche data_assinatura_contrato automaticamente
+--    ao detectar a transição FALSE → TRUE em contrato_assinado.
+--    Se já tiver um valor (reassinatura), NÃO sobrescreve (preserva a data original).
+CREATE OR REPLACE FUNCTION public.fn_set_data_assinatura_contrato()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    -- Só age na transição FALSE/NULL → TRUE
+    IF NEW.contrato_assinado = TRUE
+       AND (OLD.contrato_assinado IS DISTINCT FROM TRUE)
+       AND NEW.data_assinatura_contrato IS NULL
+    THEN
+        NEW.data_assinatura_contrato := NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_set_data_assinatura ON public.matriculas;
+
+CREATE TRIGGER trg_set_data_assinatura
+    BEFORE UPDATE OF contrato_assinado ON public.matriculas
+    FOR EACH ROW
+    EXECUTE FUNCTION public.fn_set_data_assinatura_contrato();
+
+-- ============================================================
+-- VERIFICAÇÃO v6
+-- ============================================================
+-- SELECT id, ra, contrato_assinado, data_assinatura_contrato
+-- FROM public.matriculas
+-- WHERE contrato_assinado = TRUE
+-- LIMIT 10;
+-- ============================================================
