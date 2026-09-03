@@ -604,3 +604,98 @@ CREATE TRIGGER trg_set_data_assinatura
 -- WHERE contrato_assinado = TRUE
 -- LIMIT 10;
 -- ============================================================
+
+-- ============================================================
+-- MIGRAÇÃO v7 — CADASTRO DE EX-ALUNOS (HISTÓRICO LEGADO)
+-- Adiciona suporte a alunos que concluíram cursos no passado,
+-- sem gerar matrícula ativa ou acesso ao portal.
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- ============================================================
+
+ALTER TABLE public.alunos
+    ADD COLUMN IF NOT EXISTS is_legado         BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS curso_legado_nome TEXT,
+    ADD COLUMN IF NOT EXISTS curso_legado_data TEXT;
+
+COMMENT ON COLUMN public.alunos.is_legado         IS 'TRUE quando o registro é um histórico legado (curso concluído no passado) — sem matrícula ativa nem acesso ao portal';
+COMMENT ON COLUMN public.alunos.curso_legado_nome IS 'Nome livre do curso concluído no passado (sem vínculo com a tabela cursos)';
+COMMENT ON COLUMN public.alunos.curso_legado_data IS 'Data ou período de conclusão informado pela secretaria (texto livre, ex: Dezembro/2022)';
+
+-- ============================================================
+-- ÍNDICE para facilitar filtros de alunos legado
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_alunos_is_legado ON public.alunos (is_legado);
+
+-- ============================================================
+-- RLS — As políticas existentes na tabela `alunos` já cobrem
+-- os campos novos (is_legado, curso_legado_nome, curso_legado_data)
+-- porque as policies usam WITH CHECK baseado em `perfis.tipo`.
+-- Nenhuma nova policy é necessária, mas deixamos um lembrete:
+-- ============================================================
+-- As políticas secretaria_insert_alunos / secretaria_update_alunos
+-- já devem estar ativas e permitem inserir/atualizar qualquer coluna
+-- de alunos para usuários com perfis.tipo = 'secretaria'.
+-- Se ainda não existirem, crie com:
+--
+-- CREATE POLICY "secretaria_insert_alunos"
+--     ON public.alunos FOR INSERT TO authenticated
+--     WITH CHECK (EXISTS (
+--         SELECT 1 FROM public.perfis
+--         WHERE perfis.id = auth.uid() AND perfis.tipo = 'secretaria'
+--     ));
+--
+-- CREATE POLICY "secretaria_update_alunos"
+--     ON public.alunos FOR UPDATE TO authenticated
+--     USING (EXISTS (
+--         SELECT 1 FROM public.perfis
+--         WHERE perfis.id = auth.uid() AND perfis.tipo = 'secretaria'
+--     ));
+-- ============================================================
+
+
+-- VERIFICAÇÃO v7
+-- SELECT id, nome, cpf, is_legado, curso_legado_nome, curso_legado_data
+-- FROM public.alunos
+-- WHERE is_legado = TRUE
+-- ORDER BY criado_em DESC
+-- LIMIT 20;
+-- ============================================================
+
+-- ============================================================
+-- MIGRAÇÃO v8 — REFATORAÇÃO HISTÓRICO LEGADO
+-- Substitui a coluna única `curso_legado_data` por duas colunas
+-- separadas: data de início e data de término do curso passado.
+-- Suporta também alunos híbridos (histórico + matrícula ativa).
+-- Execute no: Supabase Dashboard → SQL Editor → New Query → Run
+-- ============================================================
+
+-- Adiciona as duas novas colunas de período
+ALTER TABLE public.alunos
+    ADD COLUMN IF NOT EXISTS curso_legado_data_inicio  TEXT,
+    ADD COLUMN IF NOT EXISTS curso_legado_data_termino TEXT;
+
+-- Migra dados existentes de curso_legado_data para curso_legado_data_termino
+-- (mantém compatibilidade com registros inseridos pela v7)
+UPDATE public.alunos
+SET curso_legado_data_termino = curso_legado_data
+WHERE curso_legado_data IS NOT NULL
+  AND curso_legado_data_termino IS NULL;
+
+-- Documenta as colunas
+COMMENT ON COLUMN public.alunos.curso_legado_data_inicio  IS 'Data ou período de início do curso passado (texto livre, ex: Março/2020)';
+COMMENT ON COLUMN public.alunos.curso_legado_data_termino IS 'Data ou período de término/conclusão do curso passado (texto livre, ex: Dezembro/2022)';
+
+-- Garante que RA pode ser NULL (para alunos legado puro - Cenário A)
+-- A coluna ra já deve aceitar NULL, mas garantimos com ALTER:
+ALTER TABLE public.alunos
+    ALTER COLUMN ra DROP NOT NULL;
+
+-- ============================================================
+-- VERIFICAÇÃO v8
+-- SELECT id, nome, cpf, is_legado,
+--        curso_legado_nome, curso_legado_data_inicio, curso_legado_data_termino,
+--        ra
+-- FROM public.alunos
+-- ORDER BY criado_em DESC
+-- LIMIT 20;
+-- ============================================================

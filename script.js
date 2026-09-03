@@ -15,7 +15,35 @@ const SUPABASE_KEY = 'sb_publishable_SBbgOvJCx21UjRJucquDTQ_kWhEL8Nx';
 // Inicializa o cliente Supabase (usando o CDN do index.html)
 const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-// ==================== VARIÁVEIS GLOBAIS ====================
+// ==================== INTERCEPTOR DE SESSÃO EXPIRADA ====================
+async function _tratarErroSessao(error) {
+    if (!error) return false;
+    const msg = (error.message || '').toLowerCase();
+    const status = error.status || error.code || 0;
+    const ehJwtExpired =
+        msg.includes('jwt expired') || msg.includes('token expired') ||
+        msg.includes('invalid jwt') || msg.includes('not authenticated') ||
+        msg.includes('session_not_found') || status === 401;
+    if (!ehJwtExpired) return false;
+    try { sessionStorage.setItem('sessao_expirada', '1'); } catch (_) {}
+    try { if (db) await db.auth.signOut(); } catch (_) {}
+    window.location.replace('index.html');
+    return true;
+}
+if (db) {
+    db.auth.onAuthStateChange(async (event) => {
+        if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+            if (!window.location.pathname.endsWith('index.html') &&
+                !window.location.pathname.endsWith('/')) {
+                try { sessionStorage.setItem('sessao_expirada', '1'); } catch (_) {}
+                window.location.replace('index.html');
+            }
+        }
+    });
+}
+// =========================================================================
+
+
 let usuarioLogado = null;  // { id, email, tipo, nome }
 let alunoEditando = null;  // objeto aluno atual no modal
 let cursoEditandoId = null; // UUID do curso no modal de edição
