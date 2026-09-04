@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // MIND RECALL — login.js
 // Autenticação com RBAC: consulta a tabela `perfis` após login
 // e redireciona para o painel correto conforme o cargo.
@@ -7,7 +7,13 @@
 const SUPABASE_URL = 'https://gijgocyrumhalzqhkggj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_SBbgOvJCx21UjRJucquDTQ_kWhEL8Nx';
 
-const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// persistSession: true garante que o token JWT é salvo no localStorage
+// mesmo em ambientes de hospedagem estática como a Hostinger
+const db = window.supabase
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+          auth: { persistSession: true }
+      })
+    : null;
 
 // ==================== INICIALIZAÇÃO ====================
 document.addEventListener('DOMContentLoaded', async function () {
@@ -28,14 +34,29 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
-    // Se já houver sessão ativa, revalida o cargo e redireciona
+    // Se já houver sessão ativa, valida o cargo e redireciona
+    // Usa maybeSingle() para não lançar erro caso o perfil não exista ainda
     if (db) {
         const { data: { session } } = await db.auth.getSession();
         if (session) {
-            await redirecionarPorCargo(session.user.id);
+            const { data: perfil } = await db
+                .from('perfis')
+                .select('tipo')
+                .eq('id', session.user.id)
+                .maybeSingle();
+
+            if (perfil?.tipo === 'secretaria') {
+                window.location.replace('painel-secretaria.html');
+                return;
+            } else if (perfil?.tipo === 'professor') {
+                window.location.replace('painel-professor.html');
+                return;
+            }
+            // Se não há perfil mapeado, mantém na tela de login (sem loop)
         }
     }
 });
+
 
 // ==================== AUTENTICAÇÃO ====================
 async function verificarLogin() {
@@ -76,20 +97,25 @@ async function redirecionarPorCargo(userId) {
         .from('perfis')
         .select('tipo')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
-    if (error || !perfil) {
+    if (error) {
+        mostrarAlertaLogin('Erro ao verificar perfil. Tente novamente.');
+        return;
+    }
+
+    if (!perfil) {
         mostrarAlertaLogin('Perfil não configurado. Contate o administrador.');
         await db.auth.signOut();
         return;
     }
 
     if (perfil.tipo === 'secretaria') {
-        window.location.href = 'painel-secretaria.html';
+        window.location.replace('painel-secretaria.html');
     } else if (perfil.tipo === 'professor') {
-        window.location.href = 'painel-professor.html';
+        window.location.replace('painel-professor.html');
     } else {
-        mostrarAlertaLogin('Tipo desconhecido ("' + perfil.tipo + '"). Contate o administrador.');
+        mostrarAlertaLogin('Tipo de acesso desconhecido ("' + perfil.tipo + '"). Contate o administrador.');
         await db.auth.signOut();
     }
 }
