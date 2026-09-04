@@ -2606,3 +2606,333 @@ input[id="pag-valor"]:focus {
     font-style: italic;
 }
 
+/* ============================================================
+   RESPONSIVIDADE — PORTAL DA SECRETARIA (Mobile First)
+   Breakpoints: 768px (tablet), 480px (smartphone)
+   ============================================================ */
+
+/* ── 1. HEADER / NAVBAR ─────────────────────────────────────
+   Estratégia: header vira flex-column, nav recebe scroll
+   horizontal fluido sem quebrar o botão "Sair da Conta".    */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 0;
+        gap: 0;
+        min-height: unset;
+    }
+
+    /* Wordmark some em mobile — economiza espaço */
+    header::before {
+        display: none;
+    }
+
+    /* Nav ocupa toda a largura com scroll horizontal suave */
+    header nav {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;          /* Firefox */
+    }
+
+    header nav::-webkit-scrollbar {
+        display: none;                  /* Chrome/Safari */
+    }
+
+    header nav ul {
+        flex-wrap: nowrap;              /* impede quebra de linha */
+        padding: 6px 12px;
+        gap: 4px;
+        width: max-content;            /* cresce além da tela → scroll */
+    }
+
+    /* Botão Sair + Saudação ficam numa faixa separada abaixo da nav */
+    .header-buttons {
+        justify-content: flex-end;
+        padding: 6px 12px 8px;
+        border-top: 1px solid var(--navy-border);
+        background: rgba(10, 22, 40, 0.95);
+        flex-shrink: 0;
+    }
+
+    /* Saudação esconde em telas muito estreitas */
+    .user-greeting {
+        display: none;
+    }
+
+    /* Botão Sair: área de toque mínima de 44px */
+    #sair {
+        min-height: 44px;
+        padding: 10px 20px;
+        font-size: 0.9em;
+    }
+
+    /* Tabs: área de toque mínima de 44px */
+    .tablinks {
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 0.82em;
+    }
+}
+
+/* ── 2. MAIN PADDING ─────────────────────────────────────── */
+@media (max-width: 768px) {
+    main {
+        padding: 1em 0.75em 2em;
+    }
+
+    .tabcontent {
+        padding: 20px 16px;
+        border-radius: var(--r-md);
+    }
+}
+
+/* ── 3. TABELAS — scroll horizontal com toque suave ─────────
+   Todas as .table-section e containers inline de tabelas
+   ganham overflow-x: auto para não estourar a tela.          */
+@media (max-width: 768px) {
+    /* Containers já com .table-section */
+    .table-section {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: var(--r-md);
+    }
+
+    /* Tabela do financeiro e outras sem wrapper dedicado */
+    .fin-filtros ~ .table-section,
+    #tabela-pagamentos,
+    #tabela-alunos,
+    #tabela-secretaria,
+    #tabela-cursos,
+    #tabela-turmas,
+    #tabela-diario,
+    #tabela-vinculos-professores,
+    #tabela-certificados,
+    #tabela-contratos {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;            /* impede quebra de células */
+    }
+
+    /* Células da tabela: padding menor para caber mais colunas */
+    table th,
+    table td {
+        padding: 10px 12px;
+        font-size: 0.82em;
+    }
+
+    /* Botões de ação das tabelas: mínimo de 44px de altura */
+    .btn-action,
+    .btn-excluir,
+    .btn-baixa,
+    .btn-editar {
+        min-height: 36px;
+        padding: 8px 10px;
+        font-size: 0.78em;
+    }
+}
+
+/* ── 4. FORMULÁRIOS — coluna única em mobile ─────────────── */
+@media (max-width: 768px) {
+    /* form-grid: força 1 coluna */
+    .form-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Grids inline no HTML com style="display: grid;..." */
+    .form-section form > div[style*="grid"],
+    .form-section > div[style*="grid"],
+    #form-secretaria > div[style*="grid"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+
+    /* Matrícula: curso-entry em coluna */
+    .curso-entry > div[style*="grid"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+
+    /* Inputs, selects e botões: 100% largura e toque mínimo 44px */
+    .input-group input,
+    .input-group select,
+    .input-group textarea {
+        min-height: 44px;
+        font-size: 1rem;            /* evita zoom automático no iOS */
+    }
+
+    /* Botões de formulário: full width e toque adequado */
+    .form-section button,
+    .btn-matricular,
+    .btn-cadastrar-professor,
+    .btn-novo-pagamento,
+    #btn-add-curso,
+    #btn-salvar-curso,
+    #btn-salvar-turma,
+    #btn-salvar-disciplina,
+    #btn-vincular-professor,
+    #btn-salvar-aviso {
+        width: 100%;
+        justify-content: center;
+        min-height: 48px;
+    }
+
+    /* Header da Secretaria (título + botão) vira coluna */
+    .secretaria-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    /* Header do Financeiro */
+    .financeiro-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    /* Filtros financeiros: 1 coluna no mobile */
+    .fin-filtros-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Cards do Financeiro: 1 coluna */
+    .fin-cards {
+        grid-template-columns: 1fr;
+    }
+
+    /* Parcela card: empilha info e ações */
+    .parcela-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .parcela-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    /* Visão Geral da Turma: 1 coluna */
+    .visao-turma-container {
+        grid-template-columns: 1fr;
+    }
+
+    /* Cards sobre: 1 coluna */
+    .sobre-cards {
+        grid-template-columns: 1fr;
+    }
+
+    /* Hero sobre: coluna */
+    .sobre-hero {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    /* Coluna do body do visão-turma: sem max-height fixo */
+    .visao-coluna-body {
+        max-height: none;
+    }
+}
+
+/* ── 5. MODAIS — contidos na tela com scroll interno ─────── */
+@media (max-width: 768px) {
+    .modal-overlay {
+        padding: 0.6em;
+        align-items: flex-end;          /* modal desliza de baixo no mobile */
+    }
+
+    .modal-container {
+        max-width: 95vw;
+        max-height: 90vh;
+        width: 100%;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: var(--r-lg) var(--r-lg) 0 0; /* flat na base */
+    }
+
+    .modal-body {
+        padding: 20px 16px;
+    }
+
+    .modal-footer {
+        padding: 14px 16px;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* Botões do modal: full width em mobile */
+    .modal-btn-confirm,
+    .modal-btn-cancel,
+    .modal-btn-danger {
+        width: 100%;
+        min-height: 48px;
+        justify-content: center;
+    }
+
+    /* Footer split: empilha */
+    .modal-footer-split {
+        flex-direction: column;
+    }
+
+    .modal-footer-actions {
+        margin-left: 0;
+        width: 100%;
+        flex-direction: column;
+    }
+}
+
+/* ── 6. BREAKPOINT EXTRA ESTREITO (smartphone < 480px) ────── */
+@media (max-width: 480px) {
+    /* Tabcontent: padding mínimo */
+    .tabcontent {
+        padding: 14px 10px;
+    }
+
+    /* Font-size base levemente menor */
+    body {
+        font-size: 15px;
+    }
+
+    /* Stat cards do dashboard: fonte menor */
+    .stat-card p {
+        font-size: 2.2em;
+    }
+
+    /* Header da tab: fonte menor */
+    .tabcontent > h2 {
+        font-size: 1.2em;
+    }
+
+    /* Saudação do usuário: some completamente */
+    .user-greeting {
+        display: none;
+    }
+
+    /* Tabs: mais compactas */
+    .tablinks {
+        padding: 8px 10px;
+        font-size: 0.78em;
+    }
+
+    /* Modal: ocupa quase toda a tela */
+    .modal-container {
+        max-height: 92vh;
+        border-radius: 12px 12px 0 0;
+    }
+
+    /* Botão "Cadastrar Professor": texto abreviado via ellipsis se necessário */
+    .btn-cadastrar-professor {
+        font-size: 0.85em;
+        padding: 11px 16px;
+    }
+
+    /* Esconde texto do botão Sair e mostra só ícone em telas muito estreitas */
+    #sair {
+        font-size: 0.82em;
+        padding: 10px 14px;
+    }
+}
+

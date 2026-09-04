@@ -14,6 +14,8 @@ const SUPABASE_KEY = 'sb_publishable_SBbgOvJCx21UjRJucquDTQ_kWhEL8Nx';
 
 // Inicializa o cliente Supabase (usando o CDN do index.html)
 const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// Expõe o cliente globalmente para que o Auth Guard (painel-secretaria.html) possa acessá-lo
+window.db = db;
 
 // ==================== INTERCEPTOR DE SESSÃO EXPIRADA ====================
 /**
@@ -46,18 +48,35 @@ async function _tratarErroSessao(error) {
     return true;
 }
 
-// Ouve eventos de sessão a nível global — captura TOKEN_REFRESHED fail e
-// SIGNED_OUT disparados externamente (ex.: token revogado no Supabase Dashboard)
+// ==================== LISTENER GLOBAL DE SESSÃO ====================
+// Captura eventos de autenticação disparados externamente:
+//   • SIGNED_OUT  → logout explícito em outra aba ou via Dashboard
+//   • USER_DELETED → conta removida no Supabase Dashboard
+//   • TOKEN_REFRESHED com falha → sessão expirada com a aba aberta
+// Em qualquer desses casos, limpa o storage e redireciona para o login.
 if (db) {
-    db.auth.onAuthStateChange(async (event) => {
+    db.auth.onAuthStateChange(async (event, session) => {
+        const paginaAtual = window.location.pathname;
+        const naTelaDeLogin =
+            paginaAtual.endsWith('index.html') ||
+            paginaAtual.endsWith('/') ||
+            paginaAtual.endsWith('login');
+
+        if (naTelaDeLogin) return; // evita loop de redirect
+
         if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-            // Evita loop caso já estejamos na página de login
-            if (!window.location.pathname.endsWith('index.html') &&
-                !window.location.pathname.endsWith('/') &&
-                !window.location.pathname.endsWith('login')) {
-                try { sessionStorage.setItem('sessao_expirada', '1'); } catch (_) { }
-                window.location.replace('index.html');
-            }
+            // Sinaliza para a tela de login o motivo do logout
+            try { sessionStorage.setItem('sessao_expirada', '1'); } catch (_) { }
+            _limparStorageAuth();
+            window.location.replace('index.html');
+            return;
+        }
+
+        // TOKEN_REFRESHED sem sessão = token expirou e não pôde ser renovado
+        if (event === 'TOKEN_REFRESHED' && !session) {
+            try { sessionStorage.setItem('sessao_expirada', '1'); } catch (_) { }
+            _limparStorageAuth();
+            window.location.replace('index.html');
         }
     });
 }
@@ -112,17 +131,24 @@ function parseMoeda(valorMascarado) {
 
 // ==================== INICIALIZAÇÃO ====================
 document.addEventListener('DOMContentLoaded', async function () {
-    configurarEventos();
-
-    // Verifica sessão existente no Supabase
-    const { data: { session } } = await db.auth.getSession();
-
-    if (session) {
-        await carregarPerfilUsuario(session.user);
-        iniciarAplicacao();
-    } else {
-        mostrarLogin();
+    // Guarda de sessão secundária: o Auth Guard do HTML já verificou antes de exibir o body,
+    // mas garantimos aqui também para evitar qualquer race condition.
+    if (!db) {
+        window.location.replace('index.html');
+        return;
     }
+
+    const { data: { session }, error: errSessao } = await db.auth.getSession();
+
+    if (errSessao || !session) {
+        // Sessão inválida ou expirada — redireciona sem inicializar nada
+        window.location.replace('index.html');
+        return;
+    }
+
+    configurarEventos();
+    await carregarPerfilUsuario(session.user);
+    iniciarAplicacao();
 
     // Ouve mudanças de sessão.
     // IMPORTANTE: evitamos reinicializar o app em eventos como TOKEN_REFRESHED
@@ -133,9 +159,10 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (event === 'SIGNED_IN' && session && !usuarioLogado) {
             await carregarPerfilUsuario(session.user);
             iniciarAplicacao();
-        } else if (event === 'SIGNED_OUT') {
+        } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+            // Logout explícito ou conta deletada — o listener global já redireciona,
+            // mas zeramos o estado local por segurança.
             usuarioLogado = null;
-            mostrarLogin();
         }
         // TOKEN_REFRESHED, USER_UPDATED e outros eventos são ignorados
         // para não interromper a navegação do usuário.
@@ -186,17 +213,45 @@ async function verificarLogin() {
     // O onAuthStateChange cuida do resto
 }
 
+/**
+ * Remove do localStorage e sessionStorage todas as chaves relacionadas
+ * ao Supabase Auth (tokens, refresh tokens, etc.).
+ * Chamada tanto no logout explícito quanto na expiração de sessão.
+ */
+function _limparStorageAuth() {
+    try {
+        // O Supabase armazena a sessão com prefixo 'sb-' no localStorage
+        Object.keys(localStorage)
+            .filter(k => k.startsWith('sb-'))
+            .forEach(k => localStorage.removeItem(k));
+
+        // Limpa flags internas do sistema
+        sessionStorage.removeItem('sessao_expirada');
+    } catch (_) { }
+}
+
+/**
+ * Executa o logout completo:
+ *  1. Chama supabase.auth.signOut() para invalidar o token no servidor
+ *  2. Limpa localStorage e sessionStorage de dados de autenticação
+ *  3. Redireciona para index.html com replace() (sem deixar histórico)
+ */
 async function sairSistema() {
     try {
         if (db && db.auth) {
-            await db.auth.signOut();
+            // scope: 'global' invalida TODAS as sessões do usuário (todos os dispositivos)
+            // scope: 'local'  invalida apenas esta sessão (padrão se omitido)
+            await db.auth.signOut({ scope: 'local' });
         }
     } catch (e) {
-        console.error("Erro ao sair:", e);
+        // Mesmo se o signOut falhar (ex.: offline), limpamos o storage local
+        console.error('Erro ao realizar signOut:', e);
     }
-    // painel-secretaria.html é uma página separada (não SPA com index.html).
-    // O correto é redirecionar para o login após o signOut.
-    window.location.href = 'index.html';
+
+    _limparStorageAuth();
+
+    // replace() impede que o usuário volte ao painel pressionando "Voltar" no browser
+    window.location.replace('index.html');
 }
 
 function iniciarAplicacao() {
