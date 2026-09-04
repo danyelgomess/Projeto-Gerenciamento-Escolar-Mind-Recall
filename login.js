@@ -34,28 +34,10 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
-    // Se já houver sessão ativa, valida o cargo e redireciona
-    // Usa maybeSingle() para não lançar erro caso o perfil não exista ainda
-    if (db) {
-        const { data: { session } } = await db.auth.getSession();
-        if (session) {
-            const { data: perfil } = await db
-                .from('perfis')
-                .select('tipo')
-                .eq('id', session.user.id)
-                .maybeSingle();
-
-            if (perfil?.tipo === 'secretaria') {
-                window.location.replace('painel-secretaria.html');
-                return;
-            } else if (perfil?.tipo === 'professor') {
-                window.location.replace('painel-professor.html');
-                return;
-            }
-            // Se não há perfil mapeado, mantém na tela de login (sem loop)
-        }
-    }
+    // ── Redirecionamento automático DESATIVADO para diagnóstico de loop ──
+    // O index.html só redireciona após clique explícito no botão "Entrar".
 });
+
 
 
 // ==================== AUTENTICAÇÃO ====================
