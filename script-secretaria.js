@@ -1250,18 +1250,19 @@ async function _executarMatriculaAtiva({ nome, cpf, cursosSelecionados, valorTot
             if (errUpd) console.warn('Aviso: nao foi possivel atualizar campos extras do aluno:', errUpd);
         }
     } else {
+        // CPF salvo APENAS como dígitos (sem máscara) para padronizar buscas no login do aluno
         const cpfNumeros = cpf.replace(/\D/g, '');
-        const emailSintetico = cpfNumeros + '@aluno.mindrecall.com.br';
         const { data: cursoData } = await db.from('cursos').select('nome').eq('id', primeiroCurso.cursoId).single();
         const { data: novo, error: err } = await db.from('alunos').insert({
-            nome, cpf,
-            email_sintetico: emailSintetico,
+            nome,
+            cpf: cpfNumeros,          // sempre salvo sem máscara (só números)
             curso_id: primeiroCurso.cursoId,
             curso_nome: cursoData?.nome || '',
             turma: primeiroCurso.codigoTurma,
             valor: valorTotal,
             data_matricula: dataMatricula,
             criado_por: usuarioLogado?.id || null,
+            primeiro_acesso: true,     // aluno usa RA como senha no primeiro login
             ...camposExtras,
         }).select().single();
         if (err) throw new Error('Erro ao cadastrar aluno: ' + err.message);

@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 
-<body>
+<body style="display: none;">
     <!-- Layout Professor: Sidebar + Conteúdo -->
     <div class="professor-layout">
 
@@ -351,6 +351,39 @@
 
     <!-- Script isolado do professor -->
     <script src="script-professor.js"></script>
+
+    <!-- Auth Guard: verifica sessão E tipo antes de exibir qualquer conteúdo -->
+    <script>
+        (async function authGuardProfessor() {
+            try {
+                const SUPABASE_URL = 'https://gijgocyrumhalzqhkggj.supabase.co';
+                const SUPABASE_KEY = 'sb_publishable_SBbgOvJCx21UjRJucquDTQ_kWhEL8Nx';
+                const clienteAtivo = window.db ||
+                    (window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null);
+
+                if (!clienteAtivo) { window.location.replace('index.html'); return; }
+
+                const { data: { session }, error: errSessao } = await clienteAtivo.auth.getSession();
+                if (errSessao || !session) { window.location.replace('index.html'); return; }
+
+                const { data: perfil, error: errPerfil } = await clienteAtivo
+                    .from('perfis')
+                    .select('tipo')
+                    .eq('id', session.user.id)
+                    .single();
+
+                if (errPerfil || !perfil || perfil.tipo !== 'professor') {
+                    await clienteAtivo.auth.signOut();
+                    window.location.replace('index.html');
+                    return;
+                }
+
+                document.body.style.display = 'block';
+            } catch (err) {
+                window.location.replace('index.html');
+            }
+        })();
+    </script>
 </body>
 
 </html>

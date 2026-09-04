@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mind Recall — Login</title>
+    <title>Mind Recall &#8212; Login</title>
     <meta name="description"
         content="Acesse o sistema de gestão escolar Mind Recall. Login seguro para Secretaria e Professores.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,6 +13,34 @@
         href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800&family=Poppins:wght@600;700;800&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* ── Campo de senha com olhinho ── */
+        .senha-container {
+            position: relative;
+            width: 100%;
+        }
+        .senha-container input {
+            width: 100%;
+            padding-right: 40px;
+            box-sizing: border-box;
+        }
+        .btn-eye {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: #64748b;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+        }
+        .btn-eye:hover { color: #f59e0b; }
+        .btn-eye svg { width: 18px; height: 18px; display: block; }
+    </style>
 </head>
 
 <body>
@@ -27,13 +55,28 @@
             <form id="form-login">
                 <div class="input-group">
                     <label for="username">E-mail</label>
-                    <input type="email" id="username" name="username" autocomplete="email" placeholder="seu@email.com"
-                        required>
+                    <input type="email" id="username" name="username" autocomplete="email"
+                        placeholder="seu@email.com" required>
                 </div>
                 <div class="input-group">
                     <label for="password">Senha</label>
-                    <input type="password" id="password" name="password" autocomplete="current-password"
-                        placeholder="••••••••" required>
+                    <div style="position: relative; width: 100%;">
+                        <input type="password" id="password" name="password"
+                            autocomplete="current-password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;"
+                            style="width: 100%; padding-right: 40px; box-sizing: border-box;"
+                            required>
+                        <span id="togglePassword"
+                            style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #64748b; display: flex; align-items: center; justify-content: center; z-index: 10;"
+                            onclick="alternarVisibilidadeSenha()"
+                            title="Mostrar/ocultar senha">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </span>
+                    </div>
                 </div>
                 <button type="button" id="btn-login">Entrar no Sistema</button>
             </form>
@@ -64,6 +107,26 @@
 
     <!-- Script de login com roteamento RBAC -->
     <script src="login.js"></script>
+
+    <!-- Toggle de visibilidade da senha -->
+    <script>
+        (function () {
+            var SVG_ABERTO = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+            var SVG_FECHADO = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
+            window.alternarVisibilidadeSenha = function () {
+                var input  = document.getElementById('password');
+                var toggle = document.getElementById('togglePassword');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    toggle.innerHTML = SVG_FECHADO;
+                } else {
+                    input.type = 'password';
+                    toggle.innerHTML = SVG_ABERTO;
+                }
+            };
+        })();
+    </script>
 </body>
 
 </html>
